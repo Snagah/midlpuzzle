@@ -5,7 +5,7 @@ import {
   Menu, LogOut, ShoppingBag, Clock, Zap, Share2, Twitter, 
   HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
   ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
-  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings
+  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon
 } from 'lucide-react';
 
 // Firebase Imports
@@ -44,13 +44,16 @@ const MS_PER_HOUR = 3600000;
 const SHARE_BONUS_POINTS = 50;
 const QUIZ_LOCKOUT_MS = 24 * MS_PER_HOUR;
 
-// Firebase Init (CORRECTION TYPESCRIPT APPLIQUÉE)
-// On force le typage via (window as any) pour éviter l'erreur de compilation
-const firebaseConfig = JSON.parse((window as any).__firebase_config || '{}');
+// Firebase Init
+const firebaseConfig = JSON.parse(
+  typeof __firebase_config !== 'undefined' 
+    ? __firebase_config 
+    : (window as any).__firebase_config || '{}'
+);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof (window as any).__app_id !== 'undefined' ? (window as any).__app_id : 'default-app-id';
+const appId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id || 'default-app-id';
 
 // --- STYLES & FONTS ---
 
@@ -62,6 +65,12 @@ const GlobalStyles = () => (
       font-family: 'Outfit', sans-serif;
     }
     
+    body {
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
     .custom-scrollbar::-webkit-scrollbar {
       width: 6px;
     }
@@ -185,7 +194,7 @@ const DEFAULT_MARKET_ITEMS = [
   }
 ];
 
-// Icon Mapper for Market Items
+// Icon Mapper
 const ICON_MAP: Record<string, React.ReactNode> = {
   'zap': <Zap className="text-yellow-500" size={24} />,
   'clock': <Clock className="text-blue-500" size={24} />,
@@ -230,7 +239,7 @@ const AVATAR_URLS = [
   "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=150&h=150&fit=crop&q=80", 
 ];
 
-// --- SHARED UI COMPONENTS ---
+// --- 5. BASIC UI COMPONENTS ---
 
 const Tooltip = ({ children, text, className }: { children: React.ReactNode, text: string, className?: string }) => (
   <div className={`relative group flex items-center ${className}`}>
@@ -251,16 +260,27 @@ const ImageDropzone = ({
   setImage: (val: string) => void,
   className?: string 
 }) => {
-  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
+  
+  const processFile = (file: File) => {
+    // SECURITY CHECK: Limit file size to 800KB for Firestore storage
+    if (file.size > 800 * 1024) {
+      window.alert("⚠️ Image trop volumineuse !\n\nDans cette démo, les images sont stockées dans la base de données et doivent faire moins de 800 Ko.\n\nConseil : Utilisez une URL d'image externe ou compressez votre fichier.");
+      return;
+    }
+
+    if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = () => {
         setImage(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
   }, [setImage]);
 
   const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -269,9 +289,7 @@ const ImageDropzone = ({
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-       const reader = new FileReader();
-       reader.onload = () => setImage(reader.result as string);
-       reader.readAsDataURL(e.target.files[0]);
+       processFile(e.target.files[0]);
     }
   };
 
@@ -312,10 +330,13 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
 
   useEffect(() => {
+    if (!appId) return;
     const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'profiles'), (snap) => {
       const data: UserProfile[] = [];
       snap.forEach(d => data.push({ wallet: d.id, ...d.data() } as UserProfile));
       setProfiles(data.sort((a, b) => (b.lifetimePoints || b.points) - (a.lifetimePoints || a.points)));
+    }, (error) => {
+        console.error("Error fetching leaderboard:", error);
     });
     return () => unsub();
   }, []);
@@ -545,6 +566,10 @@ const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserPr
                    <input type="file" accept="image/*" className="hidden" onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
+                        if (file.size > 800 * 1024) {
+                           window.alert("Image trop volumineuse (Max 800 Ko).");
+                           return;
+                        }
                         const reader = new FileReader();
                         reader.onload = () => setAvatar(reader.result as string);
                         reader.readAsDataURL(file);
@@ -1098,6 +1123,86 @@ const PuzzleGame = ({
   );
 };
 
+// --- DASHBOARD COMPONENTS ---
+
+// Market component definition placed explicitly here before UserDashboard
+const Market = ({ userProfile, wallet }: { userProfile: UserProfile, wallet: string }) => {
+  const [items, setItems] = useState<MarketItem[]>([]);
+
+  useEffect(() => {
+    if (!appId) return;
+    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'market'), orderBy('order', 'asc')), (snap) => {
+      const m: MarketItem[] = [];
+      snap.forEach(d => m.push({ id: d.id, ...d.data() } as MarketItem));
+      setItems(m);
+    }, (error) => console.error(error));
+    return () => unsub();
+  }, []);
+
+  const handlePurchase = async (item: MarketItem) => {
+    if (userProfile.points < item.cost) return;
+    try {
+      let updates: any = {
+        points: userProfile.points - item.cost,
+        inventory: [...(userProfile.inventory || []), item.id]
+      };
+      if (item.type === 'multiplier' && item.value) {
+        updates.multiplier = (userProfile.multiplier || 1.0) + item.value;
+      }
+      if (item.type === 'time_reduction' && item.value) {
+        updates.lockEndTime = (userProfile.lockEndTime) - item.value;
+      }
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), updates);
+    } catch (e) { console.error("Purchase failed", e); }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="bg-white rounded-3xl p-6 md:p-8 border border-black/5 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+           <h2 className="text-2xl font-medium text-[#1A1A1A] flex items-center gap-2">
+             <ShoppingBag className="text-orange-500" /> The Market
+           </h2>
+           <div className="text-sm text-neutral-500 bg-neutral-50 px-3 py-2 rounded-xl border border-neutral-100">
+                Balance: <span className="font-bold text-black">{userProfile.points} PTS</span>
+           </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {items.map(item => {
+             const canAfford = userProfile.points >= item.cost;
+             return (
+               <button 
+                 key={item.id}
+                 onClick={() => canAfford && handlePurchase(item)}
+                 disabled={!canAfford}
+                 className={`relative group text-left p-5 rounded-2xl border transition-all ${
+                   canAfford 
+                   ? 'bg-[#F9F9F8] border-black/5 hover:border-orange-200 hover:shadow-lg hover:shadow-orange-100' 
+                   : 'bg-neutral-50 border-transparent opacity-60 cursor-not-allowed'
+                 }`}
+               >
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="p-3 bg-white rounded-xl shadow-sm border border-black/5">
+                      {ICON_MAP[item.iconKey] || <Zap size={24} />}
+                    </div>
+                    <span className={`font-bold text-sm ${canAfford ? 'text-[#1A1A1A]' : 'text-neutral-400'}`}>{item.cost} PTS</span>
+                  </div>
+                  <h3 className="font-semibold text-[#1A1A1A] mb-1">{item.name}</h3>
+                  <p className="text-xs text-neutral-500 leading-relaxed">{item.description}</p>
+                  {canAfford && (
+                    <div className="absolute inset-0 bg-black/5 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[1px]">
+                       <span className="bg-black text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg">Purchase</span>
+                    </div>
+                  )}
+               </button>
+             );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const GameView = ({ 
   activeGame, 
   isSolved, 
@@ -1112,6 +1217,7 @@ const GameView = ({
 }: any) => {
   if (!activeGame) return null;
 
+  // 1. SUCCESS POPUP
   if (isSolved && lastReward && lastReward.puzzleId === activeGame.id) {
     return (
       <div className="aspect-square w-full max-w-xl mx-auto bg-white rounded-3xl border border-black/5 flex flex-col items-center justify-center text-center p-8 relative overflow-hidden shadow-xl shadow-black/5 animate-in fade-in zoom-in duration-500">
@@ -1142,6 +1248,7 @@ const GameView = ({
     );
   }
 
+  // 2. GALLERY / COMPLETED VIEW
   if (isSolved) {
     return (
       <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-700">
@@ -1183,8 +1290,6 @@ const GameView = ({
     : <PuzzleGame game={activeGame} onComplete={(dur) => handleGameComplete(dur)} />;
 };
 
-// ... (UserDashboard, AdminPanel, App remain unchanged)
-
 const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: User, onDisconnect: () => void }) => {
   const [activeTab, setActiveTab] = useState<'puzzles' | 'market'>('puzzles');
   const [games, setGames] = useState<GameConfig[]>([]);
@@ -1200,6 +1305,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   const isFirstLoad = useRef(true);
 
   useEffect(() => {
+    if (!appId) return;
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order', 'asc')), (snap) => {
       const g: GameConfig[] = [];
       snap.forEach(d => g.push({ id: d.id, ...d.data() } as GameConfig));
@@ -1214,7 +1320,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   }, []);
 
   useEffect(() => {
-    if (!authUser) return;
+    if (!authUser || !appId) return;
     const unsub = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as UserProfile;
@@ -1362,7 +1468,6 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       </div>
       {mobileMenuOpen && (<div className="lg:hidden fixed inset-0 bg-black/50 z-40" onClick={() => setMobileMenuOpen(false)} />)}
       <aside className={`fixed inset-y-0 left-0 w-72 bg-white/80 backdrop-blur-xl border-r border-black/5 z-50 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col`}>
-        {/* ... (Same sidebar content) ... */}
         <div className="p-6 border-b border-black/5 hidden lg:block">
            <div className="flex items-center gap-3 mb-6" onClick={() => setIsProfileOpen(true)}>
               <div className="w-10 h-10 rounded-full bg-neutral-200 overflow-hidden border-2 border-white shadow-sm cursor-pointer hover:scale-105 transition-transform">
@@ -1474,6 +1579,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   );
 };
 
+// ... (AdminPanel component)
 const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: any, onDisconnect: () => void }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'missions' | 'market' | 'settings'>('missions');
   const [games, setGames] = useState<GameConfig[]>([]);
@@ -1491,15 +1597,17 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!appId) return;
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order', 'asc')), (snap) => {
       const g: GameConfig[] = [];
       snap.forEach(d => g.push({ id: d.id, ...d.data() } as GameConfig));
       setGames(g);
-    });
+    }, (error) => console.error(error));
     return () => unsub();
   }, []);
 
   useEffect(() => {
+    if (!appId) return;
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'market'), orderBy('order', 'asc')), (snap) => {
       const m: MarketItem[] = [];
       snap.forEach(d => m.push({ id: d.id, ...d.data() } as MarketItem));
@@ -1513,7 +1621,7 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
         });
         batch.commit().catch(err => console.error("Failed to seed market:", err));
       }
-    });
+    }, (error) => console.error(error));
     return () => unsub();
   }, []);
 
@@ -1536,7 +1644,7 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
       if (type === 'quiz') {
         const validAnswers = quizAnswers.filter(a => a.text.trim() !== '');
         if (!quizQuestion || !validAnswers.some(a => a.isCorrect)) {
-           alert("Quiz needs a question and at least one correct answer among valid inputs.");
+           window.alert("Quiz needs a question and at least one correct answer among valid inputs.");
            setIsSubmitting(false);
            return;
         }
@@ -1552,7 +1660,7 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
   };
 
   const handleDeleteGame = async (id: string) => {
-    if (confirm('Delete this mission?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'puzzles', id));
+    if (window.confirm('Delete this mission?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'puzzles', id));
   };
 
   const moveGame = async (idx: number, dir: -1 | 1) => {
@@ -1580,7 +1688,7 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
   };
 
   const handleDeleteItem = async (id: string) => {
-    if (confirm('Delete this item?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'market', id));
+    if (window.confirm('Delete this item?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'market', id));
   };
 
   const moveItem = async (idx: number, dir: -1 | 1) => {
@@ -1647,7 +1755,29 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
                     <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Description</label><textarea required value={newGame.description} onChange={e => setNewGame({...newGame, description: e.target.value})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none h-20" /></div>
                     {type === 'puzzle' && (
                         <>
-                        <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Image</label><ImageDropzone image={newGame.imageUrl} setImage={(val) => setNewGame({...newGame, imageUrl: val})} /></div>
+                        <div>
+                          <label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Image</label>
+                          <div className="space-y-3">
+                            <ImageDropzone image={newGame.imageUrl} setImage={(val) => setNewGame({...newGame, imageUrl: val})} />
+                            
+                            <div className="flex items-center gap-2">
+                               <div className="h-px bg-neutral-200 flex-1"></div>
+                               <span className="text-xs text-neutral-400 font-medium">OR USE URL</span>
+                               <div className="h-px bg-neutral-200 flex-1"></div>
+                            </div>
+
+                            <div className="flex gap-2">
+                               <div className="bg-neutral-100 p-3 rounded-xl text-neutral-500"><LinkIcon size={18} /></div>
+                               <input 
+                                 type="text" 
+                                 placeholder="Paste image URL here (e.g. https://images.unsplash.com/...)" 
+                                 value={newGame.imageUrl && newGame.imageUrl.startsWith('http') ? newGame.imageUrl : ''}
+                                 onChange={(e) => setNewGame({...newGame, imageUrl: e.target.value})}
+                                 className="flex-1 bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none" 
+                               />
+                            </div>
+                          </div>
+                        </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Points</label><input type="number" value={newGame.points} onChange={e => setNewGame({...newGame, points: parseInt(e.target.value)})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none" /></div>
                             <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Grid</label><select value={newGame.gridSize} onChange={e => setNewGame({...newGame, gridSize: parseInt(e.target.value)})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none"><option value={3}>3x3</option><option value={4}>4x4</option><option value={5}>5x5</option><option value={6}>6x6</option><option value={7}>7x7</option></select></div>
@@ -1801,7 +1931,7 @@ const App = () => {
   }
 
   if (view === 'dashboard' && wallet) {
-    return <UserDashboard wallet={wallet} authUser={authUser} onDisconnect={handleDisconnect} />;
+    return <UserDashboard wallet={wallet} authUser={authUser!} onDisconnect={handleDisconnect} />;
   }
 
   if (view === 'admin_panel' && wallet === ADMIN_WALLET) {
