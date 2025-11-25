@@ -78,13 +78,16 @@ const auth = initializeAuth(app, {
 });
 
 // CRITICAL FIX 2: Initialize Firestore with Force Long Polling AND Disable Streams
-// "useFetchStreams: false" is the key to fixing the 20s initial hang in specific environments
+// This prevents WebSocket timeouts in restrictive network environments
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false, 
 });
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id || 'default-app-id';
+// --- CRITICAL FIX 3: CONSISTENT APP ID ---
+// We use a fixed string so the database path is the same across all browsers/deployments.
+// This allows data sharing between users.
+const appId = "midl-puzzle-production-v1"; 
 
 // --- STYLES & FONTS ---
 
