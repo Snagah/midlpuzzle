@@ -33,6 +33,19 @@ import {
   getDoc
 } from 'firebase/firestore';
 
+// --- TYPESCRIPT GLOBAL DECLARATIONS ---
+// Ces déclarations permettent à TypeScript de reconnaître les variables injectées globalement
+declare global {
+  interface Window {
+    __firebase_config?: string;
+    __app_id?: string;
+    __initial_auth_token?: string;
+  }
+  var __firebase_config: string | undefined;
+  var __app_id: string | undefined;
+  var __initial_auth_token: string | undefined;
+}
+
 // --- CONFIGURATION & CONSTANTS ---
 
 const ADMIN_WALLET = "bc1q-midl-admin-satoshi-nakamoto"; 
@@ -47,7 +60,7 @@ const QUIZ_LOCKOUT_MS = 24 * MS_PER_HOUR;
 // Firebase Init
 const firebaseConfig = JSON.parse(
   typeof __firebase_config !== 'undefined' 
-    ? __firebase_config 
+    ? __firebase_config!
     : (window as any).__firebase_config || '{}'
 );
 const app = initializeApp(firebaseConfig);
@@ -1579,7 +1592,6 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   );
 };
 
-// ... (AdminPanel component)
 const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: any, onDisconnect: () => void }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'missions' | 'market' | 'settings'>('missions');
   const [games, setGames] = useState<GameConfig[]>([]);
