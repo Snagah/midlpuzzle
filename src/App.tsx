@@ -79,10 +79,11 @@ const auth = initializeAuth(app, {
 
 // CRITICAL FIX 2: Initialize Firestore with Force Long Polling AND Disable Streams
 // This prevents WebSocket timeouts in restrictive network environments
+// We cast to 'any' because 'useFetchStreams' is not in the standard type definition but helps with the delay
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false, 
-});
+} as any);
 
 // --- CRITICAL FIX 3: CONSISTENT APP ID ---
 // We use a fixed string so the database path is the same across all browsers/deployments.
