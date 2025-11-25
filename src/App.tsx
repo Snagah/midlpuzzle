@@ -11,11 +11,11 @@ import {
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
 import { 
-  initializeAuth, // Utilisation de initializeAuth au lieu de getAuth
+  initializeAuth, 
   signInAnonymously, 
   signInWithCustomToken, 
   onAuthStateChanged,
-  inMemoryPersistence, // Importation directe de la persistance
+  inMemoryPersistence, 
   User
 } from 'firebase/auth';
 import { 
@@ -58,24 +58,30 @@ const SHARE_BONUS_POINTS = 50;
 const QUIZ_LOCKOUT_MS = 24 * MS_PER_HOUR;
 
 // --- FIREBASE INITIALIZATION OPTIMIZED ---
-const firebaseConfig = JSON.parse(
-  typeof __firebase_config !== 'undefined' 
-    ? __firebase_config!
-    : (window as any).__firebase_config || '{}'
-);
+let firebaseConfig;
+try {
+  firebaseConfig = JSON.parse(
+    typeof __firebase_config !== 'undefined' 
+      ? __firebase_config!
+      : (window as any).__firebase_config || '{}'
+  );
+} catch (e) {
+  console.error("Firebase Config Error", e);
+  firebaseConfig = {};
+}
 
 const app = initializeApp(firebaseConfig);
 
 // CRITICAL FIX 1: Initialize Auth with explicit In-Memory persistence
-// This bypasses the default IndexedDB/LocalStorage check which causes the 20s delay/hang
 const auth = initializeAuth(app, {
   persistence: inMemoryPersistence
 });
 
-// CRITICAL FIX 2: Initialize Firestore with Force Long Polling
-// This prevents WebSocket timeouts in restrictive network environments
+// CRITICAL FIX 2: Initialize Firestore with Force Long Polling AND Disable Streams
+// "useFetchStreams: false" is the key to fixing the 20s initial hang in specific environments
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  useFetchStreams: false, 
 });
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id || 'default-app-id';
@@ -1915,9 +1921,6 @@ const App = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Removed explicit setPersistence call here since we now use initializeAuth(app, {persistence: inMemoryPersistence})
-        // This prevents race conditions.
-        
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
