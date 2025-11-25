@@ -34,7 +34,6 @@ import {
 } from 'firebase/firestore';
 
 // --- TYPESCRIPT GLOBAL DECLARATIONS ---
-// Ces déclarations permettent à TypeScript de reconnaître les variables injectées globalement
 declare global {
   interface Window {
     __firebase_config?: string;
@@ -343,13 +342,17 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
 
   useEffect(() => {
+    // IMPORTANT FIX: Guard against running query before auth/app is ready
+    // While public, it's safer to wait for general readiness
     if (!appId) return;
+    
     const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'profiles'), (snap) => {
       const data: UserProfile[] = [];
       snap.forEach(d => data.push({ wallet: d.id, ...d.data() } as UserProfile));
       setProfiles(data.sort((a, b) => (b.lifetimePoints || b.points) - (a.lifetimePoints || a.points)));
     }, (error) => {
-        console.error("Error fetching leaderboard:", error);
+        // If offline/permission error, silence it during init
+        console.log("Leaderboard sync waiting for connection...");
     });
     return () => unsub();
   }, []);
@@ -626,6 +629,13 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // IMPORTANT FIX: Prevent queries if not authenticated
+    // In this environment, you cannot query Firestore without being "signed in" (even anonymously)
+    if (!auth.currentUser) {
+       window.alert("Authentification en cours... veuillez patienter une seconde.");
+       return;
+    }
+
     setIsLoading(true);
     
     try {
@@ -639,6 +649,7 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
       }
     } catch (e) {
       console.error(e);
+      // Fallback if DB connection fails entirely
       if (password === DEFAULT_ADMIN_PASSWORD) onLogin();
       else setError(true);
     }
@@ -1317,8 +1328,9 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
   const isFirstLoad = useRef(true);
 
+  // IMPORTANT FIX: Guard UserDashboard fetches
   useEffect(() => {
-    if (!appId) return;
+    if (!appId || !authUser) return;
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order', 'asc')), (snap) => {
       const g: GameConfig[] = [];
       snap.forEach(d => g.push({ id: d.id, ...d.data() } as GameConfig));
@@ -1330,7 +1342,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       }
     });
     return () => unsub();
-  }, []);
+  }, [authUser]); // Dependency on authUser ensures we retry once auth is ready
 
   useEffect(() => {
     if (!authUser || !appId) return;
@@ -1592,6 +1604,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   );
 };
 
+// ... (AdminPanel component)
 const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: any, onDisconnect: () => void }) => {
   const [activeAdminTab, setActiveAdminTab] = useState<'missions' | 'market' | 'settings'>('missions');
   const [games, setGames] = useState<GameConfig[]>([]);
@@ -1609,17 +1622,20 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!appId) return;
+    // IMPORTANT FIX: Guard AdminPanel fetches
+    if (!appId || !authUser) return;
+    
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order', 'asc')), (snap) => {
       const g: GameConfig[] = [];
       snap.forEach(d => g.push({ id: d.id, ...d.data() } as GameConfig));
       setGames(g);
     }, (error) => console.error(error));
     return () => unsub();
-  }, []);
+  }, [authUser]); // Retry on authUser change
 
   useEffect(() => {
-    if (!appId) return;
+    if (!appId || !authUser) return;
+    
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'market'), orderBy('order', 'asc')), (snap) => {
       const m: MarketItem[] = [];
       snap.forEach(d => m.push({ id: d.id, ...d.data() } as MarketItem));
@@ -1635,7 +1651,7 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
       }
     }, (error) => console.error(error));
     return () => unsub();
-  }, []);
+  }, [authUser]);
 
   const handleCreateGame = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1828,48 +1844,6 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
             </>
         )}
         
-        {activeAdminTab === 'market' && (
-            <>
-            <div className="bg-white border border-black/5 rounded-3xl p-8 shadow-sm">
-                <h2 className="font-bold text-lg mb-6 flex items-center gap-2"><Plus className="w-5 h-5 text-orange-500" /> New Item</h2>
-                <form onSubmit={handleCreateItem} className="space-y-5">
-                    <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Name</label><input required value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none" /></div>
-                    <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Description</label><textarea required value={newItem.description} onChange={e => setNewItem({...newItem, description: e.target.value})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none h-20" /></div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Cost</label><input type="number" value={newItem.cost} onChange={e => setNewItem({...newItem, cost: parseInt(e.target.value)})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none" /></div>
-                        <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Type</label><select value={newItem.type} onChange={e => setNewItem({...newItem, type: e.target.value as any})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none"><option value="multiplier">Multiplier</option><option value="time_reduction">Time Reduction</option><option value="special">Special</option></select></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Value (e.g. 0.1)</label><input type="number" step="0.01" value={newItem.value} onChange={e => setNewItem({...newItem, value: parseFloat(e.target.value)})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none" /></div>
-                        <div><label className="block text-xs text-neutral-500 mb-1.5 uppercase font-semibold">Icon Key</label><select value={newItem.iconKey} onChange={e => setNewItem({...newItem, iconKey: e.target.value})} className="w-full bg-[#F5F5F4] rounded-xl p-3 text-sm outline-none"><option value="zap">Zap</option><option value="clock">Clock</option><option value="shield">Shield</option><option value="trophy">Trophy</option><option value="gift">Gift</option><option value="star">Star</option></select></div>
-                    </div>
-                    <button type="submit" disabled={isSubmitting} className="w-full bg-black text-white font-medium py-3 rounded-xl flex justify-center">{isSubmitting ? <Loader2 className="animate-spin" /> : "Create Item"}</button>
-                </form>
-            </div>
-            <div className="lg:col-span-2 bg-white border border-black/5 rounded-3xl p-8 shadow-sm">
-                <h2 className="font-bold text-lg mb-6">Market Items</h2>
-                <div className="space-y-2">
-                    {marketItems.map((item, idx) => (
-                        <div key={item.id} className="flex items-center gap-4 bg-[#F9F9F8] p-3 rounded-xl border border-black/5">
-                            <div className="flex flex-col gap-1">
-                                <button onClick={() => moveItem(idx, -1)} disabled={idx === 0} className="p-1 hover:bg-white rounded disabled:opacity-30"><ArrowUp size={14} /></button>
-                                <button onClick={() => moveItem(idx, 1)} disabled={idx === marketItems.length - 1} className="p-1 hover:bg-white rounded disabled:opacity-30"><ArrowDown size={14} /></button>
-                            </div>
-                            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center border border-black/5">
-                                {ICON_MAP[item.iconKey]}
-                            </div>
-                            <div className="flex-1">
-                                <div className="font-medium text-sm">{item.name}</div>
-                                <div className="text-xs text-neutral-500">{item.cost} PTS</div>
-                            </div>
-                            <button onClick={() => handleDeleteItem(item.id)} className="text-neutral-400 hover:text-red-500"><Trash2 size={16} /></button>
-                        </div>
-                    ))}
-                </div>
-            </div>
-            </>
-        )}
-        
         {activeAdminTab === 'settings' && (
            <div className="col-span-1 lg:col-span-3 bg-white border border-black/5 rounded-3xl p-8 shadow-sm">
                <h2 className="font-bold text-lg mb-6 flex items-center gap-2"><Settings className="w-5 h-5 text-neutral-500" /> Security Settings</h2>
@@ -1910,18 +1884,39 @@ const App = () => {
   const [wallet, setWallet] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [view, setView] = useState<'connect' | 'admin_login' | 'dashboard' | 'admin_panel'>('connect');
+  const [isAuthReady, setIsAuthReady] = useState(false); // New state for global auth readiness
 
   useEffect(() => {
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth initialization failed", error);
       }
     };
+    
     initAuth();
-    return onAuthStateChanged(auth, (user) => { setAuthUser(user); });
+    const unsubscribe = onAuthStateChanged(auth, (user) => { 
+      setAuthUser(user); 
+      setIsAuthReady(true); // Mark auth as ready once we get first user state
+    });
+    
+    return () => unsubscribe();
   }, []);
+
+  // GLOBAL LOADING STATE
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#F3F3F2] flex flex-col items-center justify-center">
+        <Loader2 className="w-12 h-12 animate-spin text-neutral-400 mb-4" />
+        <p className="text-neutral-500 font-medium text-sm tracking-wide">INITIALIZING PROTOCOL...</p>
+      </div>
+    );
+  }
 
   const handleDisconnect = () => { 
     setWallet(null);
