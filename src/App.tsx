@@ -8,6 +8,7 @@ import {
   Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings
 } from 'lucide-react';
 
+// Firebase Imports
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -32,6 +33,8 @@ import {
   getDoc
 } from 'firebase/firestore';
 
+// --- CONFIGURATION & CONSTANTS ---
+
 const ADMIN_WALLET = "bc1q-midl-admin-satoshi-nakamoto"; 
 const DEFAULT_ADMIN_PASSWORD = "Midl2025";
 const SNAP_THRESHOLD = 40; 
@@ -41,11 +44,14 @@ const MS_PER_HOUR = 3600000;
 const SHARE_BONUS_POINTS = 50;
 const QUIZ_LOCKOUT_MS = 24 * MS_PER_HOUR;
 
-const firebaseConfig = JSON.parse((window as any).__firebase_config || '{}');
+// Firebase Init
+const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof (window as any).__app_id !== 'undefined' ? (window as any).__app_id : 'default-app-id';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// --- STYLES ---
 
 const GlobalStyles = () => (
   <style>{`
@@ -59,12 +65,43 @@ const GlobalStyles = () => (
   `}</style>
 );
 
+// --- TYPES ---
+
 type GameType = 'puzzle' | 'quiz';
 type QuizAnswer = { id: string; text: string; isCorrect: boolean; };
 type GameConfig = { id: string; type: GameType; name: string; description?: string; imageUrl?: string; points: number; gridSize?: number; bestTime?: number; order: number; quizData?: { question: string; answers: QuizAnswer[]; }; };
 type Piece = { id: number; currentX: number; currentY: number; correctX: number; correctY: number; isLocked: boolean; inTray: boolean; };
 type UserProfile = { wallet: string; displayName: string; avatarUrl?: string; points: number; lifetimePoints: number; solvedPuzzles: string[]; lockEndTime: number; multiplier: number; inventory: string[]; failedAttempts: Record<string, number>; };
 type MarketItem = { id: string; name: string; description: string; cost: number; iconKey: string; type: 'multiplier' | 'time_reduction' | 'special'; value?: number; order: number; };
+
+// --- DEFAULTS FOR SEEDING ---
+
+const DEFAULT_PUZZLES = [
+    {
+        name: "Genesis Block",
+        description: "The very first block of the Bitcoin blockchain, mined in 2009.",
+        points: 500,
+        type: "puzzle",
+        gridSize: 3,
+        imageUrl: "https://images.unsplash.com/photo-1621416894569-0f39ed31d247?q=80&w=1000&auto=format&fit=crop",
+        order: 0
+    },
+    {
+        name: "Consensus Mechanism",
+        description: "How network participants agree on the validity of transactions.",
+        points: 300,
+        type: "quiz",
+        order: 1,
+        quizData: {
+            question: "Which mechanism does Bitcoin use to achieve consensus?",
+            answers: [
+                { id: "1", text: "Proof of Stake", isCorrect: false },
+                { id: "2", text: "Proof of Work", isCorrect: true },
+                { id: "3", text: "Proof of History", isCorrect: false }
+            ]
+        }
+    }
+];
 
 const DEFAULT_MARKET_ITEMS = [
   { name: 'Time Warp I', description: 'Increase lock reduction speed by 10%.', cost: 200, type: 'multiplier', value: 0.1, iconKey: 'zap', order: 0 },
@@ -73,15 +110,33 @@ const DEFAULT_MARKET_ITEMS = [
   { name: 'Founder 1:1', description: 'Exclusive 30min call with Midl founder.', cost: 5000, type: 'special', value: 0, iconKey: 'shield', order: 3 }
 ];
 
+// Icon Mapper
 const ICON_MAP: Record<string, React.ReactNode> = {
   'zap': <Zap className="text-yellow-500" size={24} />, 'clock': <Clock className="text-blue-500" size={24} />, 'shield': <ShieldCheck className="text-purple-500" size={24} />, 'trophy': <Trophy className="text-orange-500" size={24} />, 'gift': <Gift className="text-pink-500" size={24} />, 'star': <Star className="text-yellow-400" size={24} />
 };
+
+// --- HELPER FUNCTIONS ---
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
 const formatTimeRemaining = (endTime: number) => { const diff = endTime - Date.now(); if (diff <= 0) return "UNLOCKED"; const days = Math.floor(diff / (86400000)); const hours = Math.floor((diff % (86400000)) / (3600000)); return `${days}d ${hours.toString().padStart(2, '0')}h`; };
 const formatDuration = (ms: number) => { const min = Math.floor(ms / 60000); const sec = Math.floor((ms % 60000) / 1000); return `${min}m ${sec}s`; };
 const generateFunName = () => { const adjs = ["Cyber", "Golden", "Block", "Crypto", "Future", "Digital", "Secret", "Rapid", "Neon", "Prime"]; const nouns = ["Satoshi", "Node", "Miner", "Hash", "Ledger", "Whale", "Oracle", "Bull", "Chain", "Protocol"]; return `${adjs[randomInt(0, adjs.length - 1)]} ${nouns[randomInt(0, nouns.length - 1)]} #${randomInt(100, 999)}`; };
 const AVATAR_URLS = [ "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=150&h=150&fit=crop&q=80", "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&h=150&fit=crop&q=80", "https://images.unsplash.com/photo-1614680376593-902f74cf0d41?w=150&h=150&fit=crop&q=80", "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=150&h=150&fit=crop&q=80", "https://images.unsplash.com/photo-1614680376408-81e91ffe3db7?w=150&h=150&fit=crop&q=80", "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=150&h=150&fit=crop&q=80" ];
+
+// --- SHARED UI COMPONENTS ---
+
+const MidlLogo = () => (
+  <svg viewBox="0 0 200 200" className="w-full h-full object-contain">
+    <defs>
+      <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#FF9A9E" />
+        <stop offset="100%" stopColor="#FECFEF" />
+      </linearGradient>
+    </defs>
+    <rect width="200" height="200" fill="url(#logoGradient)" rx="40" />
+    <path d="M50 140 L80 60 L100 110 L120 60 L150 140" fill="none" stroke="black" strokeWidth="25" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 const Tooltip = ({ children, text }: { children: React.ReactNode, text: string }) => (
   <div className="relative group flex items-center">
@@ -179,7 +234,7 @@ const WalletConnect = ({ onConnect, onAdminClick }: { onConnect: (wallet: string
       <GlobalStyles />
       <div className="relative z-10 w-full flex flex-col items-center">
         <div className="bg-white/60 backdrop-blur-xl p-10 rounded-[32px] border border-white shadow-2xl max-w-md w-full text-center mb-8">
-          {/* Logo removed completely as requested */}
+          {/* Logo removed */}
           <div className="h-8"></div>
           <h1 className="text-3xl font-semibold mb-2 text-[#1A1A1A]">Midl Puzzles and quizzes</h1>
           <p className="text-neutral-500 mb-10 font-light text-lg">Reimagine Bitcoin.</p>
@@ -227,7 +282,7 @@ const PuzzleGame = ({ game, onComplete }: any) => {
   useEffect(() => {
      if(!containerRef.current) return;
      const w = containerRef.current.clientWidth;
-     setDims({ w, h: w }); // square
+     setDims({ w, h: w }); 
      const sz = game.gridSize || 3;
      const pSz = w / sz;
      const newP = [];
@@ -237,15 +292,13 @@ const PuzzleGame = ({ game, onComplete }: any) => {
      setPieces(newP);
   }, [game]);
 
-  // Simplified drag logic for brevity, assume similar full logic as before
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col items-center">
       <LiveMissionStatus startTime={startTime.current} bestTime={game.bestTime} basePoints={game.points} />
       <div className="flex flex-col md:flex-row gap-8 w-full mt-4 relative">
          <div ref={containerRef} className="w-full md:w-1/2 aspect-square bg-neutral-200 rounded-2xl relative overflow-hidden">
             {solved && <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-50"><CheckCircle className="text-green-500 w-16 h-16" /></div>}
-            {/* Pieces would render here */}
-            <div className="absolute inset-0 flex items-center justify-center text-neutral-400">Puzzle Logic Placeholder (Full logic in main app)</div>
+            <div className="absolute inset-0 flex items-center justify-center text-neutral-400">Puzzle Logic Placeholder</div>
              <button onClick={() => { setSolved(true); onComplete(Date.now() - startTime.current); }} className="absolute bottom-4 right-4 bg-black text-white px-4 py-2 rounded text-xs z-50">Simulate Solve</button>
          </div>
          <div className="w-full md:w-1/2 h-64 bg-white rounded-2xl border border-black/5 p-4">Pieces Tray</div>
@@ -269,7 +322,24 @@ const GameView = ({ activeGame, isSolved, lastReward, userProfile, handleGameCom
       </div>
     );
   }
-  if (isSolved) return <div className="bg-white p-8 rounded-2xl text-center"><CheckCircle className="mx-auto mb-4 text-green-500 w-12 h-12" /><h3 className="text-xl font-bold">Completed</h3></div>;
+  if (isSolved) {
+      return (
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-black/5">
+           <div className="text-center border-b border-black/5 pb-6 mb-6">
+               <CheckCircle className="mx-auto mb-4 text-green-500 w-12 h-12" />
+               <h3 className="text-xl font-bold">Knowledge Verified</h3>
+           </div>
+           {activeGame.type === 'quiz' && (
+               <div className="space-y-3">
+                   <div className="font-medium text-lg mb-2">{activeGame.quizData.question}</div>
+                   {activeGame.quizData.answers.map((a:any) => (
+                       <div key={a.id} className={`p-3 rounded-lg border ${a.isCorrect ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 text-gray-400'}`}>{a.text}</div>
+                   ))}
+               </div>
+           )}
+        </div>
+      );
+  }
   return activeGame.type === 'quiz' ? <QuizGame game={activeGame} onComplete={handleGameComplete} onFail={handleGameFail} lockoutUntil={getLockoutTime(activeGame.id)} /> : <PuzzleGame game={activeGame} onComplete={handleGameComplete} />;
 };
 
@@ -279,10 +349,27 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: any) => {
   const [activeGame, setActiveGame] = useState<GameConfig | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [showWelcome, setShowWelcome] = useState(false);
+  const isFirstLoad = useRef(true);
   
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order')), s => {
-        const g: any[] = []; s.forEach(d => g.push({id: d.id, ...d.data()})); setGames(g); if(g.length > 0 && !activeGame) setActiveGame(g[0]);
+    // FIX: Client-side sorting to avoid index requirement
+    const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), s => {
+        const g: any[] = []; s.forEach(d => g.push({id: d.id, ...d.data()})); 
+        g.sort((a,b) => (a.order || 0) - (b.order || 0)); // Client sort
+        setGames(g); 
+        
+        // Auto-seed if empty
+        if (g.length === 0) {
+            const batch = writeBatch(db);
+            DEFAULT_PUZZLES.forEach(p => {
+                const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'));
+                batch.set(ref, p);
+            });
+            batch.commit();
+        } else if (isFirstLoad.current) {
+            setActiveGame(g[0]);
+            isFirstLoad.current = false;
+        }
     });
     return () => unsub();
   }, []);
