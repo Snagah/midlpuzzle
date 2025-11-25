@@ -30,7 +30,8 @@ import {
   query,
   orderBy,
   writeBatch,
-  getDoc
+  getDoc,
+  initializeFirestore 
 } from 'firebase/firestore';
 
 // --- TYPESCRIPT GLOBAL DECLARATIONS ---
@@ -64,7 +65,13 @@ const firebaseConfig = JSON.parse(
 );
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+
+// IMPORTANT PERFORMANCE FIX: Force Long Polling
+// This prevents the 15-20s delay caused by WebSocket connection timeouts in restrictive environments
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+});
+
 const appId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id || 'default-app-id';
 
 // --- STYLES & FONTS ---
