@@ -15,6 +15,8 @@ import {
   signInAnonymously, 
   signInWithCustomToken, 
   onAuthStateChanged,
+  setPersistence, 
+  inMemoryPersistence,
   User
 } from 'firebase/auth';
 import { 
@@ -1326,6 +1328,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   const [games, setGames] = useState<GameConfig[]>([]);
   const [activeGame, setActiveGame] = useState<GameConfig | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [recentlyShared, setRecentlyShared] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -1353,6 +1356,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
 
   useEffect(() => {
     if (!authUser || !appId) return;
+    setProfileLoading(true);
     const unsub = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as UserProfile;
@@ -1360,6 +1364,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
            data.lifetimePoints = data.points;
         }
         setUserProfile(data);
+        setProfileLoading(false);
       } else {
         const futureDate = new Date();
         futureDate.setTime(Date.now() + INITIAL_LOCK_MS); 
@@ -1376,6 +1381,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), newProfile);
         setUserProfile(newProfile);
         setShowWelcomePopup(true); 
+        setProfileLoading(false);
       }
     });
     return () => unsub();
@@ -1485,6 +1491,16 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
 
   const activeMissions = games.filter(g => !isSolved(g.id));
   const completedMissions = games.filter(g => isSolved(g.id));
+
+  // LOADING STATE
+  if (profileLoading && !userProfile) {
+    return (
+      <div className="min-h-screen bg-[#F3F3F2] flex flex-col items-center justify-center p-6">
+         <Loader2 className="w-12 h-12 animate-spin text-neutral-400 mb-4" />
+         <p className="text-neutral-500 font-medium">Fetching User Data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F3F3F2] text-[#1A1A1A] flex flex-col lg:flex-row overflow-hidden">
@@ -1896,6 +1912,9 @@ const App = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
+        // Force in-memory persistence to avoid 20s delays from stale local storage
+        await setPersistence(auth, inMemoryPersistence); 
+        
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
