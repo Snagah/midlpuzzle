@@ -11,16 +11,14 @@ import {
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, 
+  initializeAuth, // Utilisation de initializeAuth au lieu de getAuth
   signInAnonymously, 
   signInWithCustomToken, 
   onAuthStateChanged,
-  setPersistence, 
-  inMemoryPersistence,
+  inMemoryPersistence, // Importation directe de la persistance
   User
 } from 'firebase/auth';
 import { 
-  getFirestore, 
   collection, 
   doc, 
   setDoc, 
@@ -59,17 +57,23 @@ const MS_PER_HOUR = 3600000;
 const SHARE_BONUS_POINTS = 50;
 const QUIZ_LOCKOUT_MS = 24 * MS_PER_HOUR;
 
-// Firebase Init
+// --- FIREBASE INITIALIZATION OPTIMIZED ---
 const firebaseConfig = JSON.parse(
   typeof __firebase_config !== 'undefined' 
     ? __firebase_config!
     : (window as any).__firebase_config || '{}'
 );
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 
-// IMPORTANT PERFORMANCE FIX: Force Long Polling
-// This prevents the 15-20s delay caused by WebSocket connection timeouts in restrictive environments
+const app = initializeApp(firebaseConfig);
+
+// CRITICAL FIX 1: Initialize Auth with explicit In-Memory persistence
+// This bypasses the default IndexedDB/LocalStorage check which causes the 20s delay/hang
+const auth = initializeAuth(app, {
+  persistence: inMemoryPersistence
+});
+
+// CRITICAL FIX 2: Initialize Firestore with Force Long Polling
+// This prevents WebSocket timeouts in restrictive network environments
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 });
@@ -639,7 +643,6 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // IMPORTANT FIX: Prevent queries if not authenticated
-    // In this environment, you cannot query Firestore without being "signed in" (even anonymously)
     if (!auth.currentUser) {
        window.alert("Authentification en cours... veuillez patienter une seconde.");
        return;
@@ -1912,8 +1915,8 @@ const App = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Force in-memory persistence to avoid 20s delays from stale local storage
-        await setPersistence(auth, inMemoryPersistence); 
+        // Removed explicit setPersistence call here since we now use initializeAuth(app, {persistence: inMemoryPersistence})
+        // This prevents race conditions.
         
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
