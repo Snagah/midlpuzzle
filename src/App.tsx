@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
   Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
   Activity, Database, Wifi, Filter, Mail, Search, ExternalLink, Target,
-  TrendingUp, TrendingDown, BarChart3, DollarSign
+  TrendingUp, TrendingDown, BarChart3, DollarSign, Home as HomeIcon
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -1867,7 +1867,7 @@ const GameView = ({
 };
 
 const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: User, onDisconnect: () => void }) => {
-  const [activeTab, setActiveTab] = useState<'puzzles' | 'market' | 'ninja'>('puzzles');
+  const [activeTab, setActiveTab] = useState<'home' | 'market' | 'ninja'>('home');
   const [filterType, setFilterType] = useState<'all' | 'puzzle' | 'quiz' | 'hunt'>('all');
   const [games, setGames] = useState<GameConfig[]>([]);
   const [activeGame, setActiveGame] = useState<GameConfig | null>(null);
@@ -1890,7 +1890,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       setGames(g);
       
       if (isFirstLoad.current && g.length > 0) {
-          setActiveGame(g[0]);
+          // Remove auto-select logic to show home screen
           isFirstLoad.current = false;
       }
     });
@@ -2046,8 +2046,8 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
 
   // Filtering Logic
   const filteredGames = games.filter(g => filterType === 'all' || g.type === filterType);
-  const activeMissions = filteredGames.filter(g => !isSolved(g.id));
-  const completedMissions = filteredGames.filter(g => isSolved(g.id));
+  // const activeMissions = filteredGames.filter(g => !isSolved(g.id));
+  // const completedMissions = filteredGames.filter(g => isSolved(g.id));
 
   if (profileLoading && !userProfile) {
     return (
@@ -2116,77 +2116,15 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
         </div>
 
         <nav className="flex-1 overflow-y-auto p-6 space-y-1">
-            <button onClick={() => { setActiveTab('market'); setMobileMenuOpen(false); }} className={`w-full bg-gradient-to-br p-4 rounded-2xl border flex items-center gap-4 mb-2 hover:shadow-md transition-all group text-left ${activeTab === 'market' ? 'from-orange-200 to-orange-100 border-orange-300' : 'from-orange-100 to-orange-50 border-orange-200'}`}>
-                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-orange-500 shadow-sm group-hover:scale-110 transition-transform"><ShoppingBag size={24} /></div>
-                <div><div className="font-bold text-orange-900">The Market</div><div className="text-xs text-orange-700 opacity-80">Spend your points</div></div>
+            <button onClick={() => { setActiveTab('home'); setActiveGame(null); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all font-medium ${activeTab === 'home' && !activeGame ? 'bg-black text-white' : 'hover:bg-neutral-100 text-neutral-600'}`}>
+                <HomeIcon size={20} /> Home
             </button>
-            
-            <button onClick={() => { setActiveTab('ninja'); setMobileMenuOpen(false); }} className={`w-full bg-gradient-to-br p-4 rounded-2xl border flex items-center gap-4 mb-6 hover:shadow-md transition-all group text-left ${activeTab === 'ninja' ? 'from-neutral-800 to-neutral-900 border-neutral-700 text-white' : 'from-neutral-100 to-white border-neutral-200 text-neutral-800'}`}>
-                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-black shadow-sm group-hover:scale-110 transition-transform border border-black/5"><BarChart3 size={24} /></div>
-                <div><div className={`font-bold ${activeTab === 'ninja' ? 'text-white' : 'text-black'}`}>Chart Ninja</div><div className={`text-xs opacity-80 ${activeTab === 'ninja' ? 'text-neutral-400' : 'text-neutral-500'}`}>Daily Mini-Game</div></div>
+            <button onClick={() => { setActiveTab('market'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all font-medium ${activeTab === 'market' ? 'bg-black text-white' : 'hover:bg-neutral-100 text-neutral-600'}`}>
+                <ShoppingBag size={20} /> The Market
             </button>
-
-            <div className="flex gap-1 mb-4 p-1 bg-[#F5F5F4] rounded-xl overflow-x-auto">
-              <button onClick={() => setFilterType('all')} className={`flex-1 px-2 py-1.5 text-[10px] font-bold uppercase rounded-lg whitespace-nowrap transition-all ${filterType === 'all' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}>All</button>
-              <button onClick={() => setFilterType('puzzle')} className={`flex-1 px-2 py-1.5 text-[10px] font-bold uppercase rounded-lg whitespace-nowrap transition-all ${filterType === 'puzzle' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}>Puzzles</button>
-              <button onClick={() => setFilterType('quiz')} className={`flex-1 px-2 py-1.5 text-[10px] font-bold uppercase rounded-lg whitespace-nowrap transition-all ${filterType === 'quiz' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}>Quizzes</button>
-              <button onClick={() => setFilterType('hunt')} className={`flex-1 px-2 py-1.5 text-[10px] font-bold uppercase rounded-lg whitespace-nowrap transition-all ${filterType === 'hunt' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}>Hunts</button>
-            </div>
-            
-            <div className="px-2 mb-2 flex justify-between items-end"><span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Active Missions</span></div>
-            {activeMissions.length === 0 && (<div className="px-4 py-8 text-center text-neutral-400 text-sm italic opacity-60 border border-dashed border-neutral-200 rounded-xl mb-4">No active missions.<br/>Check back later.</div>)}
-            
-            {activeMissions.map(g => {
-                const lockout = getLockoutTime(g.id);
-                const isActive = activeTab === 'puzzles' && activeGame?.id === g.id;
-                return (
-                <button key={g.id} onClick={() => { setActiveTab('puzzles'); setActiveGame(g); setLastReward(null); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all text-left group relative overflow-hidden mb-1 ${ isActive ? 'bg-black text-white shadow-lg shadow-black/10' : 'text-neutral-600 hover:bg-[#F5F5F4]' }`}>
-                    <div className="w-10 h-10 rounded-lg bg-neutral-100 border border-neutral-200 overflow-hidden flex-shrink-0 flex items-center justify-center">
-                      {lockout ? (<Lock size={16} className="text-red-400" />) : g.type === 'puzzle' ? (<img src={g.imageUrl} className="w-full h-full object-cover" alt="" />) : g.type === 'hunt' ? (<Target size={20} className="text-neutral-400" />) : (<HelpCircle size={20} className="text-neutral-400" />)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{g.name}</div>
-                      <div className={`text-[10px] flex items-center justify-between ${isActive ? 'text-neutral-400' : 'text-neutral-400'}`}>
-                        <span>{g.points} PTS</span>
-                        {g.bestTime && (
-                          <span className={`flex items-center gap-1 ${isActive ? 'text-yellow-500' : 'text-orange-400'}`}>
-                            <Crown size={8} /> {formatDuration(g.bestTime)} 
-                            {g.bestTimeHolder && <span className="opacity-75">by {g.bestTimeHolder.split(' ')[0]}</span>}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                </button>
-                );
-            })}
-            
-            {completedMissions.length > 0 && (
-              <div className="pt-4 mt-2 border-t border-black/5">
-                <button onClick={() => setShowCompleted(!showCompleted)} className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase px-2 mb-2 tracking-widest hover:text-neutral-600 transition-colors w-full text-left">
-                  {showCompleted ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Completed ({completedMissions.length})
-                </button>
-                {showCompleted && completedMissions.map(g => {
-                  const isActive = activeTab === 'puzzles' && activeGame?.id === g.id;
-                  const personalBest = userProfile?.personalBestTimes?.[g.id];
-                  
-                  return (
-                    <button key={g.id} onClick={() => { setActiveTab('puzzles'); setActiveGame(g); setLastReward(null); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all text-left group relative overflow-hidden mb-1 ${ isActive ? 'bg-[#F5F5F4] text-black' : 'text-neutral-400 hover:text-neutral-600' }`}>
-                        <div className="w-10 h-10 rounded-lg bg-neutral-100 border border-neutral-200 overflow-hidden flex-shrink-0 flex items-center justify-center relative">
-                           {g.type === 'puzzle' ? (<img src={g.imageUrl} className="w-full h-full object-cover opacity-50 grayscale" alt="" />) : g.type === 'hunt' ? (<Target size={20} className="text-neutral-300" />) : (<HelpCircle size={20} className="text-neutral-300" />)}
-                           <div className="absolute inset-0 flex items-center justify-center bg-white/20 backdrop-blur-[1px]"><CheckCircle size={16} className="text-green-500 drop-shadow-sm" /></div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">{g.name}</div>
-                          <div className="text-[10px] text-neutral-400 flex flex-col">
-                             {personalBest && <span>You: {formatDuration(personalBest)}</span>}
-                             {g.bestTime && g.bestTimeHolder && <span className="text-orange-300">Record: {formatDuration(g.bestTime)} ({g.bestTimeHolder.split(' ')[0]})</span>}
-                          </div>
-                        </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <button onClick={() => { setActiveTab('ninja'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all font-medium ${activeTab === 'ninja' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'hover:bg-orange-50 text-orange-600'}`}>
+                <BarChart3 size={20} /> Daily Chart Ninja
+            </button>
             <LeaderboardWidget currentUserWallet={wallet} />
         </nav>
         <div className="px-6 pt-2 pb-2 border-t border-black/5">
@@ -2212,22 +2150,86 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
         <div className="max-w-7xl mx-auto w-full">
           {activeTab === 'market' && userProfile && (<Market userProfile={userProfile} wallet={wallet} />)}
           
-          {/* NEW: NINJA GAME VIEW */}
           {activeTab === 'ninja' && userProfile && (
              <div className="animate-in fade-in zoom-in">
                 <div className="text-center mb-8">
                    <h1 className="text-4xl font-black text-[#1A1A1A] mb-2 tracking-tight">DAILY CHART NINJA</h1>
                    <p className="text-neutral-500 max-w-lg mx-auto">Predict the market moves. 60 seconds on the clock. Start with 200 PTS. Keep what you earn.</p>
                 </div>
-                <ChartNinjaGame userProfile={userProfile} wallet={wallet} onClose={() => setActiveTab('puzzles')} />
+                <ChartNinjaGame userProfile={userProfile} wallet={wallet} onClose={() => setActiveTab('home')} />
              </div>
           )}
 
-          {activeTab === 'puzzles' && (
+          {activeTab === 'home' && !activeGame && (
+            <div className="animate-in fade-in slide-in-from-bottom-4">
+                <div className="flex flex-col md:flex-row justify-between items-end mb-8 gap-4">
+                   <div>
+                      <h1 className="text-3xl font-bold text-[#1A1A1A] mb-2">Active Missions</h1>
+                      <p className="text-neutral-500">Select a protocol challenge to verify your knowledge.</p>
+                   </div>
+                   
+                   {/* Filters */}
+                   <div className="flex bg-white p-1 rounded-xl shadow-sm border border-neutral-200">
+                      {(['all', 'puzzle', 'quiz', 'hunt'] as const).map(t => (
+                          <button key={t} onClick={() => setFilterType(t)} className={`px-4 py-2 rounded-lg text-sm font-bold uppercase transition-all ${filterType === t ? 'bg-black text-white shadow-md' : 'text-neutral-500 hover:bg-neutral-50'}`}>
+                              {t}
+                          </button>
+                      ))}
+                   </div>
+                </div>
+
+                {/* Mission Grid */}
+                {filteredGames.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-neutral-400 bg-white rounded-3xl border border-dashed border-neutral-200">
+                        <Clock size={32} className="mb-2 opacity-50" />
+                        <p>No active missions found.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                       {filteredGames.map(game => {
+                           const solved = isSolved(game.id);
+                           const lockout = getLockoutTime(game.id);
+                           return (
+                               <div key={game.id} onClick={() => { if(!lockout) setActiveGame(game) }} className={`group relative bg-white rounded-3xl overflow-hidden border transition-all cursor-pointer hover:shadow-xl ${solved ? 'border-green-200 opacity-80' : lockout ? 'border-red-200 opacity-70' : 'border-black/5 hover:border-orange-200'}`}>
+                                   <div className="aspect-video bg-neutral-100 relative overflow-hidden">
+                                       {game.imageUrl ? <img src={game.imageUrl} className="w-full h-full object-cover transition-transform group-hover:scale-105" /> : <div className="w-full h-full bg-gradient-to-br from-neutral-100 to-neutral-200"/>}
+                                       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold shadow-sm uppercase flex items-center gap-1">
+                                           {game.type}
+                                       </div>
+                                       {solved && (
+                                           <div className="absolute inset-0 bg-green-500/20 backdrop-blur-[2px] flex items-center justify-center">
+                                               <div className="bg-white text-green-700 px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-lg"><CheckCircle size={16}/> Solved</div>
+                                           </div>
+                                       )}
+                                       {lockout && (
+                                           <div className="absolute inset-0 bg-red-500/10 backdrop-blur-[2px] flex items-center justify-center">
+                                               <div className="bg-white text-red-600 px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-lg"><Lock size={16}/> {formatTimeRemaining(lockout)}</div>
+                                           </div>
+                                       )}
+                                   </div>
+                                   <div className="p-5">
+                                       <div className="flex justify-between items-start mb-2">
+                                           <h3 className="font-bold text-lg leading-tight group-hover:text-orange-600 transition-colors truncate pr-2">{game.name}</h3>
+                                           <span className="bg-orange-50 text-orange-700 text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0">{game.points} PTS</span>
+                                       </div>
+                                       <p className="text-sm text-neutral-500 line-clamp-2 h-10">{game.description || "Complete this challenge to earn points and reduce lock time."}</p>
+                                   </div>
+                               </div>
+                           );
+                       })}
+                    </div>
+                )}
+            </div>
+          )}
+
+          {activeTab === 'home' && activeGame && (
             <div className="flex flex-col items-center justify-center w-full">
-                <div className="w-full max-w-4xl space-y-8">
-                    {games.length === 0 ? (<div className="flex items-center justify-center h-96 text-neutral-400 font-light text-lg bg-white/50 rounded-3xl border border-dashed border-neutral-200 text-center px-6"><div className="flex flex-col items-center gap-3"><div className="w-12 h-12 bg-neutral-100 rounded-full flex items-center justify-center"><Clock className="text-neutral-300" /></div><div>No active missions detected.<br/><span className="text-sm opacity-60">The network is currently quiet.</span></div></div></div>) : (
-                       <GameView 
+                <div className="w-full max-w-4xl space-y-4">
+                    <button onClick={() => setActiveGame(null)} className="flex items-center gap-2 text-neutral-500 hover:text-black transition-colors font-medium group">
+                        <ArrowUp className="rotate-[-90deg] group-hover:-translate-x-1 transition-transform" size={18} /> Back to Missions
+                    </button>
+                    
+                    <GameView 
                          activeGame={activeGame} 
                          isSolved={isSolved(activeGame?.id || '')}
                          lastReward={lastReward}
@@ -2239,7 +2241,6 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
                          recentlyShared={recentlyShared}
                          handleNextMission={handleNextMission}
                        />
-                    )}
                 </div>
             </div>
           )}
