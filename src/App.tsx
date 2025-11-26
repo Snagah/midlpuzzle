@@ -124,13 +124,13 @@ const GlobalStyles = () => (
     }
     
     @keyframes marquee {
-      0% { transform: translateX(100%); }
-      100% { transform: translateX(-100%); }
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); } /* Move exactly half (since list is doubled) */
     }
     .animate-marquee { 
-      display: inline-block; 
+      display: flex;
       white-space: nowrap; 
-      animation: marquee 15s linear infinite; /* Faster speed */
+      animation: marquee 20s linear infinite; 
     }
     .animate-marquee:hover { animation-play-state: paused; }
   `}</style>
@@ -369,7 +369,7 @@ const ActivityTicker = ({ games }: { games: GameConfig[] }) => {
     
     useEffect(() => {
         if (!appId) return;
-        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'validations'), orderBy('timestamp', 'desc'), limit(15));
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'validations'), orderBy('timestamp', 'desc'), limit(30));
         const unsub = onSnapshot(q, (snap) => {
             const acts: any[] = [];
             snap.forEach(d => acts.push({ id: d.id, ...d.data() }));
@@ -380,31 +380,23 @@ const ActivityTicker = ({ games }: { games: GameConfig[] }) => {
 
     const getGameName = (id: string) => {
         const g = games.find(game => game.id === id);
-        return g ? g.name : 'Unknown Mission';
+        return g ? g.name : `Mission ${id.substring(0, 4)}`;
     };
 
     if (activities.length === 0) return null;
 
+    // Duplicate items to create a seamless infinite scroll
+    const marqueeItems = [...activities, ...activities, ...activities];
+
     return (
-        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-2.5 border-b border-white/10 relative z-20 shadow-md">
-            <div className="flex animate-marquee gap-12 items-center">
-                {activities.map((act) => (
-                    <div key={act.id} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap">
+        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-3 border-b border-white/10 relative z-20 shadow-md">
+            <div className="flex animate-marquee">
+                {marqueeItems.map((act, idx) => (
+                    <div key={`${act.id}-${idx}`} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap mx-8">
                         <span className="text-green-400">⚡</span>
                         <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
-                        <span className="text-neutral-400">verified</span>
-                        <span className="text-orange-400 font-bold border border-orange-500/30 bg-orange-500/10 px-1.5 rounded">{getGameName(act.puzzleId)}</span>
-                        <span className="text-neutral-400">in</span>
-                        <span className="text-white font-bold">{formatDuration(act.duration)}</span>
-                        <span className="text-green-400 font-bold">(+{act.points} PTS)</span>
-                    </div>
-                ))}
-                 {activities.length < 10 && activities.map((act) => (
-                    <div key={`${act.id}-dup`} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap">
-                        <span className="text-green-400">⚡</span>
-                        <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
-                        <span className="text-neutral-400">verified</span>
-                        <span className="text-orange-400 font-bold border border-orange-500/30 bg-orange-500/10 px-1.5 rounded">{getGameName(act.puzzleId)}</span>
+                        <span className="text-neutral-400">completed</span>
+                        <span className="text-orange-400 font-bold">{getGameName(act.puzzleId)}</span>
                         <span className="text-neutral-400">in</span>
                         <span className="text-white font-bold">{formatDuration(act.duration)}</span>
                         <span className="text-green-400 font-bold">(+{act.points} PTS)</span>
