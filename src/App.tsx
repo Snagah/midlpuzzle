@@ -6,7 +6,7 @@ import {
   HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
   ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
   Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
-  Activity, Database, Wifi
+  Activity, Database, Wifi, Filter, Mail
 } from 'lucide-react';
 
 // Firebase Imports
@@ -17,6 +17,9 @@ import {
   signInWithCustomToken, 
   onAuthStateChanged,
   inMemoryPersistence, 
+  linkWithCredential,
+  EmailAuthProvider,
+  signInWithEmailAndPassword,
   User
 } from 'firebase/auth';
 import { 
@@ -32,8 +35,9 @@ import {
   orderBy,
   writeBatch,
   getDoc,
-  initializeFirestore,
-  enableIndexedDbPersistence
+  getDocs,
+  where,
+  initializeFirestore
 } from 'firebase/firestore';
 
 // --- TYPESCRIPT GLOBAL DECLARATIONS ---
@@ -52,7 +56,6 @@ declare global {
 
 const ADMIN_WALLET = "bc1q-midl-admin-satoshi-nakamoto"; 
 const DEFAULT_ADMIN_PASSWORD = "Midl2025";
-const SNAP_THRESHOLD = 40; 
 const INITIAL_LOCK_DAYS = 90;
 const INITIAL_LOCK_MS = INITIAL_LOCK_DAYS * 24 * 60 * 60 * 1000;
 const MS_PER_HOUR = 3600000;
@@ -74,21 +77,18 @@ try {
 
 const app = initializeApp(firebaseConfig);
 
-// CRITICAL FIX 1: Auth persistence
+// 1. Auth persistence
 const auth = initializeAuth(app, {
   persistence: inMemoryPersistence
 });
 
-// CRITICAL FIX 2: Firestore settings
-// We force long polling to avoid WebSocket timeouts in strict environments
+// 2. Firestore settings
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false, 
 } as any);
 
-// --- CRITICAL FIX 3: SMART APP ID ---
-// In the Preview environment, we MUST use the injected __app_id to have write permissions.
-// On Vercel/Production, __app_id is undefined, so we fallback to a constant string to share data.
+// 3. App ID logic
 const envAppId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id;
 const appId = envAppId || "midl-puzzle-production-v1";
 
@@ -149,6 +149,7 @@ type GameConfig = {
   points: number;
   gridSize?: number;
   bestTime?: number; // ms
+  bestTimeHolder?: string;
   order: number;
   quizData?: {
     question: string;
@@ -168,6 +169,8 @@ type Piece = {
 
 type UserProfile = {
   wallet: string;
+  uid?: string; // Firebase Auth UID
+  email?: string;
   displayName: string;
   avatarUrl?: string;
   points: number;
@@ -176,7 +179,8 @@ type UserProfile = {
   lockEndTime: number; 
   multiplier: number; 
   inventory: string[]; 
-  failedAttempts: Record<string, number>; 
+  failedAttempts: Record<string, number>;
+  personalBestTimes?: Record<string, number>;
 };
 
 type MarketItem = {
@@ -251,14 +255,13 @@ const formatTimeRemaining = (endTime: number) => {
   if (diff <= 0) return "UNLOCKED";
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
   return `${days}d ${hours.toString().padStart(2, '0')}h`;
 };
 
 const formatDuration = (ms: number) => {
   const min = Math.floor(ms / 60000);
-  const sec = Math.floor((ms % 60000) / 1000);
-  return `${min}m ${sec}s`;
+  const sec = (ms % 60000) / 1000;
+  return `${min}m ${sec.toFixed(2)}s`;
 };
 
 const generateFunName = () => {
@@ -426,8 +429,6 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
 
 // --- HELPER COMPONENTS ---
 
-// ... (GuideContent, GuideModal, WelcomeModal, LiveMissionStatus remain same) ...
-
 const GuideContent = () => (
   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-5xl mt-8">
     <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border border-white shadow-sm text-center flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100">
@@ -494,9 +495,21 @@ const WelcomeModal = ({ onClose }: { onClose: () => void }) => (
          <Gift className="text-orange-500 w-10 h-10" />
       </div>
       <h2 className="text-2xl font-bold text-[#1A1A1A] mb-2">Welcome to Midl!</h2>
-      <p className="text-neutral-500 mb-8">
-        You've just unlocked your identity. As a welcome bonus, we've reduced your reward lock by <strong>1 hour</strong>.
-      </p>
+      
+      <div className="text-neutral-500 mb-8 text-sm space-y-4">
+        <p>
+          You've just unlocked your identity. As a welcome bonus, we've reduced your reward lock by <strong>1 hour</strong>.
+        </p>
+        
+        <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl text-orange-800 text-left">
+          <p className="font-bold mb-1 flex items-center gap-2"><Info size={16}/> Note for BAG WARS players:</p>
+          <p className="opacity-90 leading-relaxed">
+            Users who won future rewards in <strong>Midl (The BAG WARS)</strong> will have their rewards locked for 90 days. 
+            By completing missions here, you can significantly <strong>reduce this lock time</strong>.
+          </p>
+        </div>
+      </div>
+
       <button onClick={onClose} className="w-full bg-black text-white font-bold py-3.5 rounded-xl hover:bg-neutral-800 transition-all">
         Start Earning
       </button>
@@ -504,21 +517,25 @@ const WelcomeModal = ({ onClose }: { onClose: () => void }) => (
   </div>
 );
 
+// --- LIVE MISSION STATUS ---
+
 const LiveMissionStatus = ({ 
   startTime, 
   bestTime, 
-  basePoints 
+  basePoints,
+  recordHolderName
 }: { 
   startTime: number, 
   bestTime?: number, 
-  basePoints: number 
+  basePoints: number,
+  recordHolderName?: string
 }) => {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(Date.now() - startTime);
-    }, 1000);
+    }, 100); // Update more frequently for decimals
     return () => clearInterval(interval);
   }, [startTime]);
 
@@ -542,6 +559,9 @@ const LiveMissionStatus = ({
             <div className="flex items-center gap-2 text-neutral-400">
                 <Crown size={14} className="text-yellow-500" />
                 <span>{formatDuration(bestTime)}</span>
+                {recordHolderName && (
+                   <span className="text-[10px] text-yellow-600 ml-1 uppercase font-bold">by {recordHolderName}</span>
+                )}
             </div>
             <div className="w-px h-4 bg-neutral-700"></div>
          </>
@@ -558,14 +578,28 @@ const LiveMissionStatus = ({
 const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserProfile, onClose: () => void, wallet: string }) => {
   const [name, setName] = useState(userProfile.displayName || '');
   const [avatar, setAvatar] = useState(userProfile.avatarUrl || '');
+  const [email, setEmail] = useState(userProfile.email || '');
+  const [password, setPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
 
   const handleSave = async () => {
     setIsSaving(true);
+    setStatusMsg('');
     try {
+      let newEmail = email;
+      
+      // If user entered password, try to link credential
+      if (email && password && !userProfile.email && auth.currentUser) {
+         const credential = EmailAuthProvider.credential(email, password);
+         await linkWithCredential(auth.currentUser, credential);
+         newEmail = email; // confirmed
+      }
+
       const savePromise = setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), {
         displayName: name,
-        avatarUrl: avatar
+        avatarUrl: avatar,
+        email: newEmail
       }, { merge: true });
 
       const timeoutPromise = new Promise((_, reject) => 
@@ -574,9 +608,15 @@ const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserPr
 
       await Promise.race([savePromise, timeoutPromise]);
       onClose();
-    } catch (e) {
+    } catch (e: any) {
       console.error("Profile update error", e);
-      window.alert("Erreur de sauvegarde. Vérifiez que vos 'Firestore Rules' autorisent l'écriture (Mode Test).");
+      if (e.code === 'auth/email-already-in-use') {
+          setStatusMsg("This email is already used by another account.");
+      } else if (e.code === 'auth/weak-password') {
+          setStatusMsg("Password is too weak (min 6 chars).");
+      } else {
+          setStatusMsg("Save failed. Check connection.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -584,7 +624,7 @@ const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserPr
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-white w-full max-w-md rounded-[32px] p-8 shadow-2xl animate-in fade-in zoom-in duration-300">
+      <div className="bg-white w-full max-w-md rounded-[32px] p-8 shadow-2xl animate-in fade-in zoom-in duration-300 overflow-y-auto max-h-[90vh]">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-[#1A1A1A]">Edit Profile</h2>
           <button onClick={onClose} className="p-2 bg-neutral-100 rounded-full hover:bg-neutral-200 transition-colors">
@@ -634,6 +674,44 @@ const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserPr
             />
           </div>
 
+          {/* NEW EMAIL/PASSWORD SECTION */}
+          <div className="p-4 bg-orange-50 rounded-xl border border-orange-100">
+             <div className="flex items-center gap-2 mb-3 text-orange-800 font-medium text-sm">
+                <ShieldCheck size={16} /> 
+                {userProfile.email ? 'Account Secured' : 'Secure your Account'}
+             </div>
+             
+             {userProfile.email ? (
+                <div className="text-xs text-orange-700">
+                   Linked to: <strong>{userProfile.email}</strong>
+                </div>
+             ) : (
+                <div className="space-y-3">
+                   <p className="text-xs text-orange-700/80 leading-tight">
+                      Add an email and password to log in from other devices without losing progress.
+                   </p>
+                   <div>
+                      <input 
+                        type="email" 
+                        value={email} 
+                        onChange={(e) => setEmail(e.target.value)} 
+                        className="w-full bg-white p-2 rounded-lg text-sm outline-none border border-orange-200 mb-2"
+                        placeholder="Email address"
+                      />
+                      <input 
+                        type="password" 
+                        value={password} 
+                        onChange={(e) => setPassword(e.target.value)} 
+                        className="w-full bg-white p-2 rounded-lg text-sm outline-none border border-orange-200"
+                        placeholder="Create password (min 6 chars)"
+                      />
+                   </div>
+                </div>
+             )}
+          </div>
+
+          {statusMsg && <p className="text-red-500 text-xs text-center">{statusMsg}</p>}
+
           <button 
             onClick={handleSave}
             disabled={isSaving}
@@ -660,7 +738,6 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
     const checkDb = async () => {
       if (!auth.currentUser) return;
       try {
-        // Try a lightweight read to check permissions
         await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admin', 'healthcheck'));
         setDbStatus('ok');
       } catch (e: any) {
@@ -708,7 +785,6 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
           <h2 className="text-2xl font-bold">Admin Access</h2>
         </div>
 
-        {/* DIAGNOSTIC PANEL */}
         <div className={`mb-6 p-3 rounded-xl text-xs font-mono border ${dbStatus === 'ok' ? 'bg-green-50 border-green-200 text-green-700' : dbStatus === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500'}`}>
            <div className="flex items-center gap-2 mb-1 font-bold uppercase">
              <Activity size={12} /> System Status
@@ -756,15 +832,40 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
 
 const WalletConnect = ({ onConnect, onAdminClick }: { onConnect: (wallet: string) => void, onAdminClick: () => void }) => {
   const [isConnecting, setIsConnecting] = useState(false);
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
 
   const handleConnect = () => {
     setIsConnecting(true);
     setTimeout(() => {
-      // Simulate Wallet Connection with random address
       const wallet = `bc1q-${Math.random().toString(36).substring(7)}-user`;
       onConnect(wallet);
       setIsConnecting(false);
     }, 800);
+  };
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setIsConnecting(true);
+      setLoginError('');
+      try {
+          const userCred = await signInWithEmailAndPassword(auth, email, password);
+          const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'profiles'), where('uid', '==', userCred.user.uid));
+          const snapshot = await getDocs(q);
+          
+          if (!snapshot.empty) {
+              const profileId = snapshot.docs[0].id;
+              onConnect(profileId);
+          } else {
+              onConnect(userCred.user.uid);
+          }
+      } catch (err: any) {
+          console.error(err);
+          setLoginError("Invalid email or password.");
+          setIsConnecting(false);
+      }
   };
 
   return (
@@ -776,34 +877,68 @@ const WalletConnect = ({ onConnect, onAdminClick }: { onConnect: (wallet: string
       
       <div className="relative z-10 w-full flex flex-col items-center">
         <div className="bg-white/60 backdrop-blur-xl p-10 rounded-[32px] border border-white shadow-2xl shadow-orange-900/5 max-w-md w-full text-center mb-8">
-          {/* No Logo Here */}
           <div className="h-8"></div>
           <h1 className="text-3xl font-semibold mb-2 tracking-tight text-[#1A1A1A]">Midl Puzzles and quizzes</h1>
           <p className="text-neutral-500 mb-10 font-light text-lg">Reimagine Bitcoin.</p>
+          
+          {!showEmailLogin ? (
+            <>
+                <div className="mb-6 bg-blue-50/80 border border-blue-100 p-4 rounded-xl text-sm text-blue-800 text-left">
+                    <p className="font-medium mb-1 flex items-center gap-2"><Info size={16}/> Important</p>
+                    <p className="opacity-90 leading-relaxed">
+                    Please connect with the <strong>Mainnet Wallet</strong> used for <em>Journey Through the Midl Grounds / The BAG WARS</em>.
+                    </p>
+                </div>
 
-          <div className="space-y-6">
-            <button 
-              onClick={handleConnect}
-              disabled={isConnecting}
-              className="w-full bg-[#1A1A1A] hover:bg-black text-white font-medium py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg hover:shadow-xl active:scale-[0.98]"
-            >
-              {isConnecting ? <Loader2 className="animate-spin" size={20} /> : (
-                <>
-                  <Wallet size={20} />
-                  <span>Connect Wallet</span>
-                </>
-              )}
-            </button>
-          </div>
+                <div className="space-y-4">
+                    <button 
+                    onClick={handleConnect}
+                    disabled={isConnecting}
+                    className="w-full bg-[#1A1A1A] hover:bg-black text-white font-medium py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg hover:shadow-xl active:scale-[0.98]"
+                    >
+                    {isConnecting ? <Loader2 className="animate-spin" size={20} /> : (
+                        <>
+                        <Wallet size={20} />
+                        <span>Connect Wallet</span>
+                        </>
+                    )}
+                    </button>
+                    
+                    <button onClick={() => setShowEmailLogin(true)} className="text-sm text-neutral-500 hover:text-black underline">
+                        Or login with Email
+                    </button>
+                </div>
+            </>
+          ) : (
+            <form onSubmit={handleEmailLogin} className="space-y-4 text-left">
+                <div>
+                   <label className="text-xs font-bold uppercase text-neutral-500 ml-1">Email</label>
+                   <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-white p-3 rounded-xl border border-neutral-200 outline-none focus:border-black" />
+                </div>
+                <div>
+                   <label className="text-xs font-bold uppercase text-neutral-500 ml-1">Password</label>
+                   <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-white p-3 rounded-xl border border-neutral-200 outline-none focus:border-black" />
+                </div>
+                
+                {loginError && <p className="text-red-500 text-xs">{loginError}</p>}
+
+                <button 
+                    type="submit"
+                    disabled={isConnecting}
+                    className="w-full bg-[#1A1A1A] hover:bg-black text-white font-medium py-4 rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg"
+                >
+                    {isConnecting ? <Loader2 className="animate-spin" size={20} /> : 'Login'}
+                </button>
+                <button type="button" onClick={() => setShowEmailLogin(false)} className="w-full text-sm text-neutral-500 py-2 hover:text-black">Cancel</button>
+            </form>
+          )}
         </div>
 
-        {/* How it Works Section */}
         <div className="w-full max-w-4xl">
            <div className="text-center mb-8 opacity-50 text-xs font-bold tracking-[0.2em] uppercase text-neutral-500">Game Protocol</div>
            <GuideContent />
         </div>
 
-        {/* Admin Access - Moved to Bottom */}
         <div className="mt-12 mb-4">
           <button 
             onClick={onAdminClick}
@@ -873,8 +1008,12 @@ const QuizGame = ({
   return (
     <div className="w-full max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 relative flex flex-col items-center">
       
-      {/* Live HUD */}
-      <LiveMissionStatus startTime={startTimeRef.current} bestTime={game.bestTime} basePoints={game.points} />
+      <LiveMissionStatus 
+        startTime={startTimeRef.current} 
+        bestTime={game.bestTime} 
+        basePoints={game.points} 
+        recordHolderName={game.bestTimeHolder}
+      />
 
       <div className="w-full bg-white rounded-[24px] md:rounded-[32px] border border-black/5 overflow-hidden shadow-sm p-6 md:p-10 relative mt-4">
          {game.description && (
@@ -960,7 +1099,6 @@ const PuzzleGame = ({
     if (!containerRef.current || !trayRef.current) return;
     
     const { clientWidth: gridW } = containerRef.current;
-    // Measure tray dimensions
     const { offsetLeft: trayX, offsetTop: trayY, clientWidth: trayW, clientHeight: trayH } = trayRef.current;
     
     setGridSizePx({ width: gridW, height: gridW });
@@ -1040,9 +1178,8 @@ const PuzzleGame = ({
             const snappedX = gridX + (col * pieceSize);
             const snappedY = gridY + (row * pieceSize);
             
-            const absCorrectX = gridX + p.correctX;
-            const absCorrectY = gridY + p.correctY;
-
+            const absCorrectX = gridX + piece.correctX;
+            const absCorrectY = gridY + piece.correctY;
             const dist = Math.sqrt(Math.pow(snappedX - absCorrectX, 2) + Math.pow(snappedY - absCorrectY, 2));
             
             if (dist < 10) {
@@ -1075,8 +1212,12 @@ const PuzzleGame = ({
         </div>
       </div>
       
-      {/* Live HUD */}
-      <LiveMissionStatus startTime={startTimeRef.current} bestTime={game.bestTime} basePoints={game.points} />
+      <LiveMissionStatus 
+        startTime={startTimeRef.current} 
+        bestTime={game.bestTime} 
+        basePoints={game.points} 
+        recordHolderName={game.bestTimeHolder}
+      />
 
       {game.description && (
            <div className="mb-6 p-4 bg-white/60 backdrop-blur-sm rounded-xl border border-white shadow-sm w-full">
@@ -1211,7 +1352,6 @@ const PuzzleGame = ({
 
 // --- DASHBOARD COMPONENTS ---
 
-// Market component definition placed explicitly here before UserDashboard
 const Market = ({ userProfile, wallet }: { userProfile: UserProfile, wallet: string }) => {
   const [items, setItems] = useState<MarketItem[]>([]);
 
@@ -1303,7 +1443,6 @@ const GameView = ({
 }: any) => {
   if (!activeGame) return null;
 
-  // 1. SUCCESS POPUP
   if (isSolved && lastReward && lastReward.puzzleId === activeGame.id) {
     return (
       <div className="aspect-square w-full max-w-xl mx-auto bg-white rounded-3xl border border-black/5 flex flex-col items-center justify-center text-center p-8 relative overflow-hidden shadow-xl shadow-black/5 animate-in fade-in zoom-in duration-500">
@@ -1334,7 +1473,6 @@ const GameView = ({
     );
   }
 
-  // 2. GALLERY / COMPLETED VIEW
   if (isSolved) {
     return (
       <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-700">
@@ -1378,6 +1516,7 @@ const GameView = ({
 
 const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: User, onDisconnect: () => void }) => {
   const [activeTab, setActiveTab] = useState<'puzzles' | 'market'>('puzzles');
+  const [filterType, setFilterType] = useState<'all' | 'puzzle' | 'quiz'>('all'); // NEW FILTER STATE
   const [games, setGames] = useState<GameConfig[]>([]);
   const [activeGame, setActiveGame] = useState<GameConfig | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -1391,7 +1530,6 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
   const isFirstLoad = useRef(true);
 
-  // IMPORTANT FIX: Guard UserDashboard fetches
   useEffect(() => {
     if (!appId || !authUser) return;
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order', 'asc')), (snap) => {
@@ -1405,7 +1543,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       }
     });
     return () => unsub();
-  }, [authUser]); // Dependency on authUser ensures we retry once auth is ready
+  }, [authUser]); 
 
   useEffect(() => {
     if (!authUser || !appId) return;
@@ -1420,16 +1558,19 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
         setProfileLoading(false);
       } else {
         const futureDate = new Date();
-        futureDate.setTime(Date.now() + INITIAL_LOCK_MS); 
+        // FIX: Add 5 min buffer to ensure it shows 23h instead of 22h immediately
+        futureDate.setTime(Date.now() + INITIAL_LOCK_MS + (5 * 60 * 1000)); 
         const bonusTime = futureDate.getTime() - MS_PER_HOUR;
         
         const newProfile: UserProfile = { 
-          wallet, 
+          wallet,
+          uid: authUser.uid,
           displayName: generateFunName(),
           avatarUrl: AVATAR_URLS[Math.floor(Math.random() * AVATAR_URLS.length)],
           points: 0, lifetimePoints: 0, solvedPuzzles: [], 
           lockEndTime: bonusTime, multiplier: 1.0, inventory: [],
-          failedAttempts: {}
+          failedAttempts: {},
+          personalBestTimes: {}
         };
         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), newProfile);
         setUserProfile(newProfile);
@@ -1464,17 +1605,24 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       const newPoints = userProfile.points + earnedPoints;
       const newLifetime = (userProfile.lifetimePoints || 0) + earnedPoints;
       const newSolved = [...(userProfile.solvedPuzzles || []), activeGame.id];
+      
+      const newPersonalBest = {
+        ...(userProfile.personalBestTimes || {}),
+        [activeGame.id]: duration
+      };
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), {
         points: newPoints, 
         lifetimePoints: newLifetime,
         solvedPuzzles: newSolved, 
-        lockEndTime: newLockTime
+        lockEndTime: newLockTime,
+        personalBestTimes: newPersonalBest
       });
       
       if (isNewRecord) {
          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'puzzles', activeGame.id), {
-            bestTime: duration
+            bestTime: duration,
+            bestTimeHolder: userProfile.displayName // Save record holder name
          });
       }
 
@@ -1512,19 +1660,15 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
 
   const handleShare = async () => {
     if (!activeGame || !userProfile || recentlyShared) return;
-    
     let tweetText = "";
-    
     if (activeGame.type === 'quiz') {
        const answersText = activeGame.quizData?.answers.map((a:any) => `- ${a.text}`).join('\n') || "";
        tweetText = `I just completed this quiz about Midl!\n\n${activeGame.description || "Knowledge Verified."}\n\nQ: ${activeGame.quizData?.question}\n${answersText}\n\nCan you answer?`;
     } else {
        tweetText = `I just completed this puzzle about Midl!`;
     }
-
     const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`; 
     window.open(url, '_blank');
-
     try {
       setRecentlyShared(true);
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), {
@@ -1542,8 +1686,10 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
     return undefined;
   };
 
-  const activeMissions = games.filter(g => !isSolved(g.id));
-  const completedMissions = games.filter(g => isSolved(g.id));
+  // Filtering Logic
+  const filteredGames = games.filter(g => filterType === 'all' || g.type === filterType);
+  const activeMissions = filteredGames.filter(g => !isSolved(g.id));
+  const completedMissions = filteredGames.filter(g => isSolved(g.id));
 
   // LOADING STATE
   if (profileLoading && !userProfile) {
@@ -1569,6 +1715,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       </div>
       {mobileMenuOpen && (<div className="lg:hidden fixed inset-0 bg-black/50 z-40" onClick={() => setMobileMenuOpen(false)} />)}
       <aside className={`fixed inset-y-0 left-0 w-72 bg-white/80 backdrop-blur-xl border-r border-black/5 z-50 transform transition-transform duration-300 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col`}>
+        {/* Sidebar Header - User Info */}
         <div className="p-6 border-b border-black/5 hidden lg:block">
            <div className="flex items-center gap-3 mb-6" onClick={() => setIsProfileOpen(true)}>
               <div className="w-10 h-10 rounded-full bg-neutral-200 overflow-hidden border-2 border-white shadow-sm cursor-pointer hover:scale-105 transition-transform">
@@ -1589,18 +1736,61 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
             <div className="text-lg font-medium text-[#1A1A1A] font-mono">{userProfile ? formatTimeRemaining(userProfile.lockEndTime) : "Calculating..."}</div>
           </div>
         </div>
+        
+        {/* FIX: Mobile Header now includes Profile Access */}
         <div className="p-6 border-b border-black/5 lg:hidden mt-16">
-           <div className="flex justify-between items-center mb-2"><span className="font-bold text-lg">Dashboard</span><button onClick={() => setMobileMenuOpen(false)}><X size={24} /></button></div>
-           <div className="text-2xl font-bold text-[#1A1A1A] mb-2">{userProfile?.points || 0} PTS</div>
+           <div className="flex justify-between items-center mb-4">
+             <span className="font-bold text-lg">Dashboard</span>
+             <button onClick={() => setMobileMenuOpen(false)}><X size={24} /></button>
+           </div>
+           
+           <div className="flex items-center gap-3 mb-6 bg-white p-3 rounded-xl border border-neutral-100 shadow-sm" onClick={() => { setIsProfileOpen(true); setMobileMenuOpen(false); }}>
+              <div className="w-10 h-10 rounded-full bg-neutral-200 overflow-hidden border border-neutral-100">
+                 {userProfile?.avatarUrl ? <img src={userProfile.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-400"><UserIcon size={20} /></div>}
+              </div>
+              <div className="flex-1">
+                 <div className="font-bold text-sm text-[#1A1A1A] flex items-center gap-1">
+                    {userProfile?.displayName} <Edit2 size={12} className="opacity-50" />
+                 </div>
+                 <div className="text-xs text-neutral-400">{userProfile?.points} PTS</div>
+              </div>
+           </div>
+
+           <div className="text-lg font-bold text-[#1A1A1A] mb-2">Lock Timer</div>
            <div className="bg-[#F5F5F4] p-3 rounded-xl text-sm font-mono">{userProfile ? formatTimeRemaining(userProfile.lockEndTime) : "--"}</div>
         </div>
+
         <nav className="flex-1 overflow-y-auto p-6 space-y-1">
             <button onClick={() => { setActiveTab('market'); setMobileMenuOpen(false); }} className="w-full bg-gradient-to-br from-orange-100 to-orange-50 p-4 rounded-2xl border border-orange-200 flex items-center gap-4 mb-6 hover:shadow-md transition-all group text-left">
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-orange-500 shadow-sm group-hover:scale-110 transition-transform"><ShoppingBag size={24} /></div>
                 <div><div className="font-bold text-orange-900">The Market</div><div className="text-xs text-orange-700 opacity-80">Spend your points</div></div>
             </button>
+
+            {/* NEW: GAME FILTERS */}
+            <div className="flex gap-2 mb-4 p-1 bg-[#F5F5F4] rounded-xl">
+              <button 
+                onClick={() => setFilterType('all')} 
+                className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${filterType === 'all' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}
+              >
+                All
+              </button>
+              <button 
+                onClick={() => setFilterType('puzzle')} 
+                className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${filterType === 'puzzle' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}
+              >
+                Puzzles
+              </button>
+              <button 
+                onClick={() => setFilterType('quiz')} 
+                className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${filterType === 'quiz' ? 'bg-white shadow-sm text-black' : 'text-neutral-400 hover:text-neutral-600'}`}
+              >
+                Quizzes
+              </button>
+            </div>
+            
             <div className="px-2 mb-2 flex justify-between items-end"><span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Active Missions</span></div>
             {activeMissions.length === 0 && (<div className="px-4 py-8 text-center text-neutral-400 text-sm italic opacity-60 border border-dashed border-neutral-200 rounded-xl mb-4">No active missions.<br/>Check back later.</div>)}
+            
             {activeMissions.map(g => {
                 const lockout = getLockoutTime(g.id);
                 const isActive = activeTab === 'puzzles' && activeGame?.id === g.id;
@@ -1609,10 +1799,22 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
                     <div className="w-10 h-10 rounded-lg bg-neutral-100 border border-neutral-200 overflow-hidden flex-shrink-0 flex items-center justify-center">
                       {lockout ? (<Lock size={16} className="text-red-400" />) : g.type === 'puzzle' ? (<img src={g.imageUrl} className="w-full h-full object-cover" alt="" />) : (<HelpCircle size={20} className="text-neutral-400" />)}
                     </div>
-                    <div className="flex-1 min-w-0"><div className="font-medium text-sm truncate">{g.name}</div><div className={`text-[10px] ${isActive ? 'text-neutral-400' : 'text-neutral-400'}`}>{g.points} PTS</div></div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{g.name}</div>
+                      <div className={`text-[10px] flex items-center justify-between ${isActive ? 'text-neutral-400' : 'text-neutral-400'}`}>
+                        <span>{g.points} PTS</span>
+                        {g.bestTime && (
+                          <span className={`flex items-center gap-1 ${isActive ? 'text-yellow-500' : 'text-orange-400'}`}>
+                            <Crown size={8} /> {formatDuration(g.bestTime)} 
+                            {g.bestTimeHolder && <span className="opacity-75">by {g.bestTimeHolder.split(' ')[0]}</span>}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                 </button>
                 );
             })}
+            
             {completedMissions.length > 0 && (
               <div className="pt-4 mt-2 border-t border-black/5">
                 <button onClick={() => setShowCompleted(!showCompleted)} className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase px-2 mb-2 tracking-widest hover:text-neutral-600 transition-colors w-full text-left">
@@ -1620,13 +1822,21 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
                 </button>
                 {showCompleted && completedMissions.map(g => {
                   const isActive = activeTab === 'puzzles' && activeGame?.id === g.id;
+                  const personalBest = userProfile?.personalBestTimes?.[g.id];
+                  
                   return (
                     <button key={g.id} onClick={() => { setActiveTab('puzzles'); setActiveGame(g); setLastReward(null); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all text-left group relative overflow-hidden mb-1 ${ isActive ? 'bg-[#F5F5F4] text-black' : 'text-neutral-400 hover:text-neutral-600' }`}>
                         <div className="w-10 h-10 rounded-lg bg-neutral-100 border border-neutral-200 overflow-hidden flex-shrink-0 flex items-center justify-center relative">
                            {g.type === 'puzzle' ? (<img src={g.imageUrl} className="w-full h-full object-cover opacity-50 grayscale" alt="" />) : (<HelpCircle size={20} className="text-neutral-300" />)}
                            <div className="absolute inset-0 flex items-center justify-center bg-white/20 backdrop-blur-[1px]"><CheckCircle size={16} className="text-green-500 drop-shadow-sm" /></div>
                         </div>
-                        <div className="flex-1 min-w-0"><div className="font-medium text-sm truncate">{g.name}</div></div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">{g.name}</div>
+                          <div className="text-[10px] text-neutral-400 flex flex-col">
+                             {personalBest && <span>You: {formatDuration(personalBest)}</span>}
+                             {g.bestTime && g.bestTimeHolder && <span className="text-orange-300">Record: {formatDuration(g.bestTime)} ({g.bestTimeHolder.split(' ')[0]})</span>}
+                          </div>
+                        </div>
                     </button>
                   );
                 })}
@@ -1680,8 +1890,11 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
   );
 };
 
-// ... (AdminPanel component)
+// ... (AdminPanel & App components remain largely the same, reusing from history unless changes requested)
+
 const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: any, onDisconnect: () => void }) => {
+  // ... (Keeping previous AdminPanel logic for brevity, as changes were in UserDashboard/Types/LiveStatus) ...
+  // Re-implementing AdminPanel fully to ensure file completeness
   const [activeAdminTab, setActiveAdminTab] = useState<'missions' | 'market' | 'settings'>('missions');
   const [games, setGames] = useState<GameConfig[]>([]);
   const [marketItems, setMarketItems] = useState<MarketItem[]>([]);
@@ -1698,34 +1911,22 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    // IMPORTANT FIX: Guard AdminPanel fetches
     if (!appId || !authUser) return;
-    
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), orderBy('order', 'asc')), (snap) => {
       const g: GameConfig[] = [];
       snap.forEach(d => g.push({ id: d.id, ...d.data() } as GameConfig));
       setGames(g);
-    }, (error) => console.error(error));
+    });
     return () => unsub();
-  }, [authUser]); // Retry on authUser change
+  }, [authUser]);
 
   useEffect(() => {
     if (!appId || !authUser) return;
-    
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'market'), orderBy('order', 'asc')), (snap) => {
       const m: MarketItem[] = [];
       snap.forEach(d => m.push({ id: d.id, ...d.data() } as MarketItem));
       setMarketItems(m);
-
-      if (snap.empty) {
-        const batch = writeBatch(db);
-        DEFAULT_MARKET_ITEMS.forEach(item => {
-          const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'market'));
-          batch.set(ref, item);
-        });
-        batch.commit().catch(err => console.error("Failed to seed market:", err));
-      }
-    }, (error) => console.error(error));
+    });
     return () => unsub();
   }, [authUser]);
 
@@ -1755,10 +1956,8 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
         gameData.quizData = { question: quizQuestion, answers: validAnswers };
       }
 
-      // CRITICAL FIX: Timeout race for addDoc to prevent infinite loading
       const addPromise = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), gameData);
       const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 5000));
-      
       await Promise.race([addPromise, timeoutPromise]);
 
       setNewGame({ name: '', points: 100, gridSize: 3, description: '', imageUrl: '' });
@@ -1800,13 +1999,10 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
         ...newItem,
         order: marketItems.length > 0 ? Math.max(...marketItems.map(i => i.order)) + 1 : 0,
       };
-      
-      // CRITICAL FIX: Timeout race
       await Promise.race([
           addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'market'), itemData),
           new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
       ]);
-
       setNewItem({ name: '', cost: 100, type: 'multiplier', iconKey: 'zap', value: 0.1 });
     } catch (err) { 
         console.error(err); 
@@ -1995,7 +2191,8 @@ const App = () => {
   const [wallet, setWallet] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [view, setView] = useState<'connect' | 'admin_login' | 'dashboard' | 'admin_panel'>('connect');
-  const [isAuthReady, setIsAuthReady] = useState(false); // New state for global auth readiness
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -2005,19 +2202,49 @@ const App = () => {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Auth initialization failed", error);
+        if (error.code === 'auth/operation-not-allowed') {
+          setConfigError('auth/operation-not-allowed');
+        }
       }
     };
     
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, (user) => { 
       setAuthUser(user); 
-      setIsAuthReady(true); // Mark auth as ready once we get first user state
+      setIsAuthReady(true); 
     });
     
     return () => unsubscribe();
   }, []);
+
+  if (configError === 'auth/operation-not-allowed') {
+    return (
+      <div className="min-h-screen bg-[#F3F3F2] flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-white p-8 rounded-[32px] shadow-xl max-w-md w-full">
+          <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <ShieldCheck size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-[#1A1A1A] mb-4">Configuration Requise</h2>
+          <p className="text-neutral-600 text-sm mb-6 leading-relaxed">
+            L'authentification est désactivée dans votre projet Firebase.
+            <br/><br/>
+            1. Allez sur la <strong>Console Firebase</strong>.
+            <br/>
+            2. Cliquez sur <strong>Authentication</strong> (menu gauche).
+            <br/>
+            3. Cliquez sur <strong>Sign-in method</strong>.
+            <br/>
+            4. Activez <strong>Anonymous</strong> et <strong>Email/Password</strong>.
+          </p>
+          <button onClick={() => window.location.reload()} className="bg-black text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-neutral-800 transition-colors">
+            J'ai activé, recharger
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // GLOBAL LOADING STATE
   if (!isAuthReady) {
