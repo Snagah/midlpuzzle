@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+// NETTOYAGE COMPLET DES IMPORTS: On ne garde que les icônes Lucide "sûres" et basiques
 import { 
   Loader2, CheckCircle, XCircle, Wallet, ShieldCheck, 
-  LayoutGrid, RefreshCw, Trophy, Plus, Lock, Play, ArrowUpRight, 
-  Menu, LogOut, ShoppingBag, Clock, Zap, Share2, Twitter, 
-  HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
-  ChevronDown, ChevronRight, Timer, ArrowRight, X, User as UserIcon, 
-  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
-  Activity, MapPin, ExternalLink, Search
+  LayoutGrid, Trophy, Plus, Lock, Menu, LogOut, ShoppingBag, Clock, 
+  HelpCircle, Upload, Trash2, Info, 
+  ChevronDown, Timer, X, User as UserIcon, 
+  Camera, ArrowUp, ArrowDown, BookOpen, Key, Settings, Link as LinkIcon,
+  MapPin, ExternalLink, Search
 } from 'lucide-react';
 
 // Firebase Imports
@@ -200,6 +200,15 @@ type MarketItem = {
 };
 
 // --- SHOP CONFIGURATION ---
+// Safe icon mapping using only basic imported icons
+const ICON_MAP: Record<string, React.ReactNode> = {
+  'zap': <Trophy className="text-yellow-500" size={24} />, // Replaced Zap
+  'clock': <Clock className="text-blue-500" size={24} />,
+  'shield': <ShieldCheck className="text-purple-500" size={24} />,
+  'trophy': <Trophy className="text-orange-500" size={24} />,
+  'gift': <Trophy className="text-pink-500" size={24} />, // Replaced Gift
+  'star': <Trophy className="text-yellow-400" size={24} /> // Replaced Star
+};
 
 const DEFAULT_MARKET_ITEMS = [
   {
@@ -240,15 +249,6 @@ const DEFAULT_MARKET_ITEMS = [
   }
 ];
 
-// Icon Mapper
-const ICON_MAP: Record<string, React.ReactNode> = {
-  'zap': <Zap className="text-yellow-500" size={24} />,
-  'clock': <Clock className="text-blue-500" size={24} />,
-  'shield': <ShieldCheck className="text-purple-500" size={24} />,
-  'trophy': <Trophy className="text-orange-500" size={24} />,
-  'gift': <Gift className="text-pink-500" size={24} />,
-};
-
 // --- HELPER FUNCTIONS ---
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
@@ -265,7 +265,7 @@ const formatTimeRemaining = (endTime: number) => {
 // UPDATED: Round to seconds, NO decimals
 const formatDuration = (ms: number) => {
   const min = Math.floor(ms / 60000);
-  const sec = Math.floor((ms % 60000) / 1000); // Changed to Math.floor for integer seconds
+  const sec = Math.floor((ms % 60000) / 1000);
   return `${min}m ${sec.toString().padStart(2, '0')}s`;
 };
 
@@ -506,7 +506,6 @@ const WelcomeModal = ({ onClose }: { onClose: () => void }) => (
           You've just unlocked your identity. As a welcome bonus, we've reduced your reward lock by <strong>1 hour</strong>.
         </p>
         
-        {/* NEW INFO BLOCK FOR BAG WARS */}
         <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl text-orange-800 text-left">
           <p className="font-bold mb-1 flex items-center gap-2"><Info size={16}/> Note for BAG WARS players:</p>
           <p className="opacity-90 leading-relaxed">
@@ -541,7 +540,7 @@ const LiveMissionStatus = ({
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(Date.now() - startTime);
-    }, 100); // Update more frequently for decimals
+    }, 100); 
     return () => clearInterval(interval);
   }, [startTime]);
 
@@ -563,7 +562,7 @@ const LiveMissionStatus = ({
        {bestTime && (
          <>
             <div className="flex items-center gap-2 text-neutral-400">
-                <Crown size={14} className="text-yellow-500" />
+                <Trophy size={14} className="text-yellow-500" />
                 <span>{formatDuration(bestTime)}</span>
                 {recordHolderName && (
                    <span className="text-[10px] text-yellow-600 ml-1 uppercase font-bold">by {recordHolderName}</span>
