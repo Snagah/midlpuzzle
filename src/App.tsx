@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
   Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
   Activity, Database, Wifi, Filter, Mail, Search, ExternalLink, Target,
-  TrendingUp, TrendingDown, BarChart3, DollarSign, Home as HomeIcon
+  TrendingUp, TrendingDown, BarChart3, DollarSign, Home as HomeIcon, Puzzle
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -127,7 +127,11 @@ const GlobalStyles = () => (
       0% { transform: translateX(100%); }
       100% { transform: translateX(-100%); }
     }
-    .animate-marquee { display: inline-block; white-space: nowrap; animation: marquee 30s linear infinite; }
+    .animate-marquee { 
+      display: inline-block; 
+      white-space: nowrap; 
+      animation: marquee 20s linear infinite; /* Speed increased (lower duration) */
+    }
     .animate-marquee:hover { animation-play-state: paused; }
   `}</style>
 );
@@ -360,7 +364,7 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
 };
 
 // --- NEW COMPONENT: ACTIVITY TICKER ---
-const ActivityTicker = () => {
+const ActivityTicker = ({ games }: { games: GameConfig[] }) => {
     const [activities, setActivities] = useState<any[]>([]);
     
     useEffect(() => {
@@ -374,30 +378,36 @@ const ActivityTicker = () => {
         return () => unsub();
     }, []);
 
+    const getGameName = (id: string) => {
+        const g = games.find(game => game.id === id);
+        return g ? g.name : 'Unknown Mission';
+    };
+
     if (activities.length === 0) return null;
 
     return (
-        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-2 border-b border-white/10 relative z-20">
-            <div className="flex animate-marquee gap-8 items-center">
+        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-2.5 border-b border-white/10 relative z-20 shadow-md">
+            <div className="flex animate-marquee gap-12 items-center">
                 {activities.map((act) => (
-                    <div key={act.id} className="flex items-center gap-2 text-xs font-mono opacity-80 whitespace-nowrap">
+                    <div key={act.id} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap">
                         <span className="text-green-400">⚡</span>
                         <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
-                        <span>completed mission</span>
-                        <span className="text-orange-300 font-bold">#{act.puzzleId ? act.puzzleId.substring(0,4) : '???'}</span>
-                        <span>in</span>
+                        <span className="text-neutral-400">verified</span>
+                        <span className="text-orange-400 font-bold border border-orange-500/30 bg-orange-500/10 px-1.5 rounded">{getGameName(act.puzzleId)}</span>
+                        <span className="text-neutral-400">in</span>
                         <span className="text-white font-bold">{formatDuration(act.duration)}</span>
-                        <span className="text-green-400">(+{act.points} PTS)</span>
+                        <span className="text-green-400 font-bold">(+{act.points} PTS)</span>
                     </div>
                 ))}
-                 {activities.length < 5 && activities.map((act) => (
-                    <div key={`${act.id}-dup`} className="flex items-center gap-2 text-xs font-mono opacity-80 whitespace-nowrap">
+                 {activities.length < 10 && activities.map((act) => (
+                    <div key={`${act.id}-dup`} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap">
                         <span className="text-green-400">⚡</span>
                         <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
-                        <span>completed mission</span>
-                        <span className="text-orange-300 font-bold">#{act.puzzleId ? act.puzzleId.substring(0,4) : '???'}</span>
-                        <span>in</span>
+                        <span className="text-neutral-400">verified</span>
+                        <span className="text-orange-400 font-bold border border-orange-500/30 bg-orange-500/10 px-1.5 rounded">{getGameName(act.puzzleId)}</span>
+                        <span className="text-neutral-400">in</span>
                         <span className="text-white font-bold">{formatDuration(act.duration)}</span>
+                        <span className="text-green-400 font-bold">(+{act.points} PTS)</span>
                     </div>
                 ))}
             </div>
@@ -2144,7 +2154,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
       <main className="flex-1 p-4 lg:p-12 overflow-y-auto lg:ml-72 pt-20 lg:pt-12 z-10 relative flex flex-col">
         {/* NEW: SCROLLING TICKER IN MAIN CONTENT AREA */}
         <div className="mb-6 -mt-2">
-           <ActivityTicker />
+           <ActivityTicker games={games} />
         </div>
 
         <div className="max-w-7xl mx-auto w-full">
@@ -2185,35 +2195,33 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
                         <p>No active missions found.</p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                        {filteredGames.map(game => {
                            const solved = isSolved(game.id);
                            const lockout = getLockoutTime(game.id);
                            return (
-                               <div key={game.id} onClick={() => { if(!lockout) setActiveGame(game) }} className={`group relative bg-white rounded-3xl overflow-hidden border transition-all cursor-pointer hover:shadow-xl ${solved ? 'border-green-200 opacity-80' : lockout ? 'border-red-200 opacity-70' : 'border-black/5 hover:border-orange-200'}`}>
-                                   <div className="aspect-video bg-neutral-100 relative overflow-hidden">
-                                       {game.imageUrl ? <img src={game.imageUrl} className="w-full h-full object-cover transition-transform group-hover:scale-105" /> : <div className="w-full h-full bg-gradient-to-br from-neutral-100 to-neutral-200"/>}
-                                       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold shadow-sm uppercase flex items-center gap-1">
-                                           {game.type}
-                                       </div>
-                                       {solved && (
-                                           <div className="absolute inset-0 bg-green-500/20 backdrop-blur-[2px] flex items-center justify-center">
-                                               <div className="bg-white text-green-700 px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-lg"><CheckCircle size={16}/> Solved</div>
-                                           </div>
-                                       )}
-                                       {lockout && (
-                                           <div className="absolute inset-0 bg-red-500/10 backdrop-blur-[2px] flex items-center justify-center">
-                                               <div className="bg-white text-red-600 px-4 py-2 rounded-full font-bold flex items-center gap-2 shadow-lg"><Lock size={16}/> {formatTimeRemaining(lockout)}</div>
-                                           </div>
-                                       )}
+                               <div key={game.id} onClick={() => { if(!lockout) setActiveGame(game) }} className={`group relative bg-white rounded-2xl p-4 border transition-all cursor-pointer hover:shadow-xl flex flex-col items-center text-center gap-3 ${solved ? 'border-green-200 bg-green-50/30' : lockout ? 'border-red-200 bg-red-50/30' : 'border-black/5 hover:border-orange-200 hover:-translate-y-1'}`}>
+                                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm ${solved ? 'bg-green-100 text-green-600' : lockout ? 'bg-red-100 text-red-600' : 'bg-neutral-100 text-neutral-600 group-hover:bg-orange-100 group-hover:text-orange-600 transition-colors'}`}>
+                                       {game.type === 'puzzle' ? <Puzzle size={24} /> : game.type === 'quiz' ? <HelpCircle size={24} /> : <Target size={24} />}
                                    </div>
-                                   <div className="p-5">
-                                       <div className="flex justify-between items-start mb-2">
-                                           <h3 className="font-bold text-lg leading-tight group-hover:text-orange-600 transition-colors truncate pr-2">{game.name}</h3>
-                                           <span className="bg-orange-50 text-orange-700 text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0">{game.points} PTS</span>
+                                   
+                                   <div className="w-full">
+                                       <h3 className="font-bold text-sm leading-tight text-[#1A1A1A] mb-1 truncate">{game.name}</h3>
+                                       <div className="flex items-center justify-center gap-2">
+                                          <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">{game.type}</span>
+                                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${solved ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
+                                            {solved ? 'DONE' : `${game.points} PTS`}
+                                          </span>
                                        </div>
-                                       <p className="text-sm text-neutral-500 line-clamp-2 h-10">{game.description || "Complete this challenge to earn points and reduce lock time."}</p>
                                    </div>
+
+                                   {lockout && (
+                                       <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center rounded-2xl">
+                                           <div className="bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold text-xs flex items-center gap-1 shadow-sm border border-red-100">
+                                              <Lock size={12}/> {formatTimeRemaining(lockout)}
+                                           </div>
+                                       </div>
+                                   )}
                                </div>
                            );
                        })}
