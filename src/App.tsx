@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// NETTOYAGE COMPLET DES IMPORTS: On ne garde que les icônes Lucide "sûres" et basiques
+// FIX: Added missing icon imports (Star, Crown, Zap, Gift, Edit2) to resolve undefined errors
 import { 
   Loader2, CheckCircle, XCircle, Wallet, ShieldCheck, 
-  LayoutGrid, Trophy, Plus, Lock, Menu, LogOut, ShoppingBag, Clock, 
-  HelpCircle, Upload, Trash2, Info, 
-  ChevronDown, Timer, X, User as UserIcon, 
-  Camera, ArrowUp, ArrowDown, BookOpen, Key, Settings, Link as LinkIcon,
-  MapPin, ExternalLink, Search
+  LayoutGrid, RefreshCw, Trophy, Plus, Lock, Play, ArrowUpRight, 
+  Menu, LogOut, ShoppingBag, Clock, Zap, Share2, Twitter, 
+  HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
+  ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
+  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
+  Activity, Database, Wifi, Filter, Mail, MapPin, ExternalLink, Search
 } from 'lucide-react';
 
 // Firebase Imports
@@ -200,15 +201,6 @@ type MarketItem = {
 };
 
 // --- SHOP CONFIGURATION ---
-// Safe icon mapping using only basic imported icons
-const ICON_MAP: Record<string, React.ReactNode> = {
-  'zap': <Trophy className="text-yellow-500" size={24} />, // Replaced Zap
-  'clock': <Clock className="text-blue-500" size={24} />,
-  'shield': <ShieldCheck className="text-purple-500" size={24} />,
-  'trophy': <Trophy className="text-orange-500" size={24} />,
-  'gift': <Trophy className="text-pink-500" size={24} />, // Replaced Gift
-  'star': <Trophy className="text-yellow-400" size={24} /> // Replaced Star
-};
 
 const DEFAULT_MARKET_ITEMS = [
   {
@@ -248,6 +240,17 @@ const DEFAULT_MARKET_ITEMS = [
     order: 3
   }
 ];
+
+// Icon Mapper
+// FIX: Icons are now imported, so this mapping will work correctly
+const ICON_MAP: Record<string, React.ReactNode> = {
+  'zap': <Zap className="text-yellow-500" size={24} />,
+  'clock': <Clock className="text-blue-500" size={24} />,
+  'shield': <ShieldCheck className="text-purple-500" size={24} />,
+  'trophy': <Trophy className="text-orange-500" size={24} />,
+  'gift': <Gift className="text-pink-500" size={24} />,
+  'star': <Star className="text-yellow-400" size={24} /> 
+};
 
 // --- HELPER FUNCTIONS ---
 
@@ -506,6 +509,7 @@ const WelcomeModal = ({ onClose }: { onClose: () => void }) => (
           You've just unlocked your identity. As a welcome bonus, we've reduced your reward lock by <strong>1 hour</strong>.
         </p>
         
+        {/* NEW INFO BLOCK FOR BAG WARS */}
         <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl text-orange-800 text-left">
           <p className="font-bold mb-1 flex items-center gap-2"><Info size={16}/> Note for BAG WARS players:</p>
           <p className="opacity-90 leading-relaxed">
@@ -540,7 +544,7 @@ const LiveMissionStatus = ({
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(Date.now() - startTime);
-    }, 100); 
+    }, 100); // Update more frequently for decimals
     return () => clearInterval(interval);
   }, [startTime]);
 
@@ -562,7 +566,7 @@ const LiveMissionStatus = ({
        {bestTime && (
          <>
             <div className="flex items-center gap-2 text-neutral-400">
-                <Trophy size={14} className="text-yellow-500" />
+                <Crown size={14} className="text-yellow-500" />
                 <span>{formatDuration(bestTime)}</span>
                 {recordHolderName && (
                    <span className="text-[10px] text-yellow-600 ml-1 uppercase font-bold">by {recordHolderName}</span>
@@ -1430,7 +1434,7 @@ const GameView = ({
       <div className="aspect-square w-full max-w-xl mx-auto bg-white rounded-3xl border border-black/5 flex flex-col items-center justify-center text-center p-8 relative overflow-hidden shadow-xl animate-in fade-in zoom-in">
         <div className="relative z-10 bg-white/90 p-10 rounded-[32px] border border-white shadow-sm backdrop-blur-xl max-w-md">
             <div className="w-24 h-24 bg-yellow-50 text-yellow-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-100">
-               {lastReward.isRecord ? "🏆" : <CheckCircle className="w-12 h-12" />}
+               {lastReward.isRecord ? <Trophy className="w-12 h-12 animate-bounce" /> : <CheckCircle className="w-12 h-12" />}
             </div>
             <h2 className="text-3xl font-bold text-[#1A1A1A] mb-1">{lastReward.isRecord ? "NEW RECORD!" : "Mission Complete"}</h2>
             <p className="text-neutral-400 mb-6">Protocol Verified Successfully</p>
@@ -1546,8 +1550,8 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
     const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'market'), orderBy('order', 'asc')), (snap) => {
       const m: MarketItem[] = [];
       snap.forEach(d => m.push({ id: d.id, ...d.data() } as MarketItem));
-      setMarketItems(m);
-    });
+      setItems(m);
+    }, (error) => { console.error(error); });
     return () => unsub();
   }, [authUser]);
 
