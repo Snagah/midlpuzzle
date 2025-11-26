@@ -130,7 +130,7 @@ const GlobalStyles = () => (
     .animate-marquee { 
       display: inline-block; 
       white-space: nowrap; 
-      animation: marquee 20s linear infinite; /* Speed increased (lower duration) */
+      animation: marquee 15s linear infinite; /* Faster speed */
     }
     .animate-marquee:hover { animation-play-state: paused; }
   `}</style>
@@ -2201,25 +2201,36 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
                            const lockout = getLockoutTime(game.id);
                            return (
                                <div key={game.id} onClick={() => { if(!lockout) setActiveGame(game) }} className={`group relative bg-white rounded-2xl p-4 border transition-all cursor-pointer hover:shadow-xl flex flex-col items-center text-center gap-3 ${solved ? 'border-green-200 bg-green-50/30' : lockout ? 'border-red-200 bg-red-50/30' : 'border-black/5 hover:border-orange-200 hover:-translate-y-1'}`}>
-                                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm ${solved ? 'bg-green-100 text-green-600' : lockout ? 'bg-red-100 text-red-600' : 'bg-neutral-100 text-neutral-600 group-hover:bg-orange-100 group-hover:text-orange-600 transition-colors'}`}>
-                                       {game.type === 'puzzle' ? <Puzzle size={24} /> : game.type === 'quiz' ? <HelpCircle size={24} /> : <Target size={24} />}
+                                   
+                                   {/* Compact Icon Tile */}
+                                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm ${
+                                       solved ? 'bg-green-100 text-green-600' : 
+                                       lockout ? 'bg-red-100 text-red-600' : 
+                                       game.type === 'puzzle' ? 'bg-purple-100 text-purple-600' : 
+                                       game.type === 'quiz' ? 'bg-blue-100 text-blue-600' : 
+                                       'bg-orange-100 text-orange-600'
+                                   } group-hover:scale-110 transition-transform`}>
+                                       {lockout ? <Lock size={24} /> : 
+                                        game.type === 'puzzle' ? <Puzzle size={24} /> : 
+                                        game.type === 'quiz' ? <HelpCircle size={24} /> : 
+                                        <Target size={24} />}
                                    </div>
                                    
                                    <div className="w-full">
                                        <h3 className="font-bold text-sm leading-tight text-[#1A1A1A] mb-1 truncate">{game.name}</h3>
                                        <div className="flex items-center justify-center gap-2">
                                           <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">{game.type}</span>
-                                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${solved ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
-                                            {solved ? 'DONE' : `${game.points} PTS`}
-                                          </span>
+                                          {!lockout && (
+                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${solved ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
+                                                {solved ? 'DONE' : `${game.points} PTS`}
+                                            </span>
+                                          )}
                                        </div>
                                    </div>
 
                                    {lockout && (
-                                       <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] flex items-center justify-center rounded-2xl">
-                                           <div className="bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold text-xs flex items-center gap-1 shadow-sm border border-red-100">
-                                              <Lock size={12}/> {formatTimeRemaining(lockout)}
-                                           </div>
+                                       <div className="mt-1 bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm border border-red-100 w-full">
+                                          <Clock size={10}/> {formatTimeRemaining(lockout)}
                                        </div>
                                    )}
                                </div>
