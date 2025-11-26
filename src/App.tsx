@@ -405,13 +405,24 @@ const ActivityTicker = () => {
     );
 };
 
-// --- NEW COMPONENT: DAILY CHART NINJA GAME ---
+// --- NEW COMPONENT: DAILY CHART NINJA GAME (CANDLES) ---
 const ChartNinjaGame = ({ userProfile, wallet, onClose }: { userProfile: UserProfile, wallet: string, onClose: () => void }) => {
+  // Candle Data Structure
+  interface Candle {
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  }
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(NINJA_STARTING_POINTS);
   const [timeLeft, setTimeLeft] = useState(NINJA_GAME_DURATION);
-  const [priceHistory, setPriceHistory] = useState<number[]>([50000]);
+  
+  // State for Candles instead of line points
+  const [candles, setCandles] = useState<Candle[]>([{ open: 50000, high: 50020, low: 49980, close: 50000 }]);
+  
   const [currentBet, setCurrentBet] = useState<'UP' | 'DOWN' | null>(null);
   const [message, setMessage] = useState('');
   
@@ -431,14 +442,27 @@ const ChartNinjaGame = ({ userProfile, wallet, onClose }: { userProfile: UserPro
       timerRef.current = setInterval(() => {
         setTimeLeft(prev => prev - 1);
         
-        setPriceHistory(prev => {
-          const lastPrice = prev[prev.length - 1];
-          const volatility = lastPrice * 0.002; // 0.2% volatility
-          const change = (Math.random() - 0.5) * volatility;
-          const newPrice = lastPrice + change;
+        setCandles(prev => {
+          const lastCandle = prev[prev.length - 1];
+          const lastClose = lastCandle.close;
           
+          // Generate new candle data based on volatility
+          const volatility = lastClose * 0.0015; // 0.15% volatility per sec
+          const change = (Math.random() - 0.5) * volatility * 2; // Random walk
+          const newClose = lastClose + change;
+          const newOpen = lastClose;
+          
+          // Randomize high/low based on open/close
+          const maxBody = Math.max(newOpen, newClose);
+          const minBody = Math.min(newOpen, newClose);
+          const newHigh = maxBody + Math.random() * volatility * 0.5;
+          const newLow = minBody - Math.random() * volatility * 0.5;
+
+          const newCandle = { open: newOpen, high: newHigh, low: newLow, close: newClose };
+          
+          // Bet Resolution
           if (currentBet) {
-             const won = (currentBet === 'UP' && newPrice > lastPrice) || (currentBet === 'DOWN' && newPrice < lastPrice);
+             const won = (currentBet === 'UP' && newClose > lastClose) || (currentBet === 'DOWN' && newClose < lastClose);
              if (won) {
                 setScore(s => s + 10);
                 setMessage("+10");
@@ -451,8 +475,8 @@ const ChartNinjaGame = ({ userProfile, wallet, onClose }: { userProfile: UserPro
              setMessage("");
           }
 
-          const newHistory = [...prev, newPrice];
-          if (newHistory.length > 50) newHistory.shift(); 
+          const newHistory = [...prev, newCandle];
+          if (newHistory.length > 40) newHistory.shift(); // Keep last 40 candles visible
           return newHistory;
         });
 
@@ -463,7 +487,7 @@ const ChartNinjaGame = ({ userProfile, wallet, onClose }: { userProfile: UserPro
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isPlaying, timeLeft, currentBet]);
 
-  // Draw Chart
+  // Draw Candles
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -474,41 +498,72 @@ const ChartNinjaGame = ({ userProfile, wallet, onClose }: { userProfile: UserPro
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
 
-    if (priceHistory.length < 2) return;
+    if (candles.length < 2) return;
 
-    const min = Math.min(...priceHistory);
-    const max = Math.max(...priceHistory);
-    const range = max - min || 1;
-
-    ctx.beginPath();
-    ctx.strokeStyle = '#F97316'; 
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-
-    priceHistory.forEach((price, i) => {
-       const x = (i / (priceHistory.length - 1)) * width;
-       const y = height - ((price - min) / range) * (height - 40) - 20;
-       if (i === 0) ctx.moveTo(x, y);
-       else ctx.lineTo(x, y);
+    // Calculate Min/Max for Y-Axis Scaling
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    candles.forEach(c => {
+        if (c.low < minPrice) minPrice = c.low;
+        if (c.high > maxPrice) maxPrice = c.high;
     });
-    ctx.stroke();
+    
+    // Add padding to Top/Bottom
+    const paddingPrice = (maxPrice - minPrice) * 0.1; 
+    minPrice -= paddingPrice;
+    maxPrice += paddingPrice;
+    const range = maxPrice - minPrice || 1;
 
-    const lastPrice = priceHistory[priceHistory.length - 1];
-    const lastX = width;
-    const lastY = height - ((lastPrice - min) / range) * (height - 40) - 20;
+    const candleWidth = (width / 45) * 0.6; // 60% of slot width
+    const slotWidth = width / 45; 
+
+    candles.forEach((c, i) => {
+       // X Position
+       const x = i * slotWidth + (slotWidth - candleWidth) / 2;
+       
+       // Y Positions (Inverted because Canvas Y=0 is top)
+       const yOpen = height - ((c.open - minPrice) / range) * height;
+       const yClose = height - ((c.close - minPrice) / range) * height;
+       const yHigh = height - ((c.high - minPrice) / range) * height;
+       const yLow = height - ((c.low - minPrice) / range) * height;
+
+       const isGreen = c.close >= c.open;
+       ctx.fillStyle = isGreen ? '#22c55e' : '#ef4444'; // Green-500 / Red-500
+       ctx.strokeStyle = isGreen ? '#22c55e' : '#ef4444';
+       
+       // Draw Wick
+       ctx.beginPath();
+       ctx.moveTo(x + candleWidth / 2, yHigh);
+       ctx.lineTo(x + candleWidth / 2, yLow);
+       ctx.stroke();
+
+       // Draw Body
+       // Canvas rect height needs to be positive
+       const bodyTop = Math.min(yOpen, yClose);
+       const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1); // Ensure at least 1px height
+       
+       ctx.fillRect(x, bodyTop, candleWidth, bodyHeight);
+    });
+
+    // Draw current price line
+    const lastCandle = candles[candles.length - 1];
+    const lastY = height - ((lastCandle.close - minPrice) / range) * height;
     
     ctx.beginPath();
-    ctx.fillStyle = '#F97316';
-    ctx.arc(lastX - 2, lastY, 4, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = '#9ca3af'; // Neutral-400
+    ctx.moveTo(0, lastY);
+    ctx.lineTo(width, lastY);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-  }, [priceHistory]);
+  }, [candles]);
 
   const startGame = () => {
      setIsPlaying(true);
      setScore(NINJA_STARTING_POINTS);
      setTimeLeft(NINJA_GAME_DURATION);
-     setPriceHistory([50000]);
+     setCandles([{ open: 50000, high: 50020, low: 49980, close: 50000 }]);
   };
 
   const endGame = async () => {
