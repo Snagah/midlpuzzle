@@ -5,7 +5,8 @@ import {
   Menu, LogOut, ShoppingBag, Clock, Zap, Share2, Twitter, 
   HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
   ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
-  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon
+  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
+  Activity, Database, Wifi
 } from 'lucide-react';
 
 // Firebase Imports
@@ -31,7 +32,8 @@ import {
   orderBy,
   writeBatch,
   getDoc,
-  initializeFirestore 
+  initializeFirestore,
+  enableIndexedDbPersistence
 } from 'firebase/firestore';
 
 // --- TYPESCRIPT GLOBAL DECLARATIONS ---
@@ -72,23 +74,23 @@ try {
 
 const app = initializeApp(firebaseConfig);
 
-// CRITICAL FIX 1: Initialize Auth with explicit In-Memory persistence
+// CRITICAL FIX 1: Auth persistence
 const auth = initializeAuth(app, {
   persistence: inMemoryPersistence
 });
 
-// CRITICAL FIX 2: Initialize Firestore with Force Long Polling AND Disable Streams
-// This prevents WebSocket timeouts in restrictive network environments
-// We cast to 'any' because 'useFetchStreams' is not in the standard type definition but helps with the delay
+// CRITICAL FIX 2: Firestore settings
+// We force long polling to avoid WebSocket timeouts in strict environments
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
   useFetchStreams: false, 
 } as any);
 
-// --- CRITICAL FIX 3: CONSISTENT APP ID ---
-// We use a fixed string so the database path is the same across all browsers/deployments.
-// This allows data sharing between users.
-const appId = "midl-puzzle-production-v1"; 
+// --- CRITICAL FIX 3: SMART APP ID ---
+// In the Preview environment, we MUST use the injected __app_id to have write permissions.
+// On Vercel/Production, __app_id is undefined, so we fallback to a constant string to share data.
+const envAppId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id;
+const appId = envAppId || "midl-puzzle-production-v1";
 
 // --- STYLES & FONTS ---
 
@@ -297,9 +299,8 @@ const ImageDropzone = ({
 }) => {
   
   const processFile = (file: File) => {
-    // SECURITY CHECK: Limit file size to 800KB for Firestore storage
     if (file.size > 800 * 1024) {
-      window.alert("⚠️ Image trop volumineuse !\n\nDans cette démo, les images sont stockées dans la base de données et doivent faire moins de 800 Ko.\n\nConseil : Utilisez une URL d'image externe ou compressez votre fichier.");
+      window.alert("⚠️ Image trop volumineuse (Max 800 Ko).");
       return;
     }
 
@@ -365,17 +366,13 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
 
   useEffect(() => {
-    // IMPORTANT FIX: Guard against running query before auth/app is ready
-    // While public, it's safer to wait for general readiness
     if (!appId) return;
-    
     const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'profiles'), (snap) => {
       const data: UserProfile[] = [];
       snap.forEach(d => data.push({ wallet: d.id, ...d.data() } as UserProfile));
       setProfiles(data.sort((a, b) => (b.lifetimePoints || b.points) - (a.lifetimePoints || a.points)));
     }, (error) => {
-        // If offline/permission error, silence it during init
-        console.log("Leaderboard sync waiting for connection...");
+        console.log("Leaderboard fetch error:", error.message);
     });
     return () => unsub();
   }, []);
@@ -428,6 +425,8 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
 };
 
 // --- HELPER COMPONENTS ---
+
+// ... (GuideContent, GuideModal, WelcomeModal, LiveMissionStatus remain same) ...
 
 const GuideContent = () => (
   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-5xl mt-8">
@@ -505,8 +504,6 @@ const WelcomeModal = ({ onClose }: { onClose: () => void }) => (
   </div>
 );
 
-// --- LIVE MISSION STATUS ---
-
 const LiveMissionStatus = ({ 
   startTime, 
   bestTime, 
@@ -525,7 +522,6 @@ const LiveMissionStatus = ({
     return () => clearInterval(interval);
   }, [startTime]);
 
-  // Calculate Dynamic Reward
   let multiplier = 1.0;
   if (!bestTime || elapsed < bestTime) {
      multiplier = 1.0;
@@ -567,15 +563,23 @@ const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserPr
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), {
+      const savePromise = setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), {
         displayName: name,
         avatarUrl: avatar
-      });
+      }, { merge: true });
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Request timed out")), 8000)
+      );
+
+      await Promise.race([savePromise, timeoutPromise]);
       onClose();
     } catch (e) {
       console.error("Profile update error", e);
+      window.alert("Erreur de sauvegarde. Vérifiez que vos 'Firestore Rules' autorisent l'écriture (Mode Test).");
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   };
 
   return (
@@ -649,10 +653,27 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [dbStatus, setDbStatus] = useState<'checking' | 'ok' | 'error'>('checking');
+  const [dbErrorDetails, setDbErrorDetails] = useState('');
+
+  useEffect(() => {
+    const checkDb = async () => {
+      if (!auth.currentUser) return;
+      try {
+        // Try a lightweight read to check permissions
+        await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admin', 'healthcheck'));
+        setDbStatus('ok');
+      } catch (e: any) {
+        console.error("DB Health Check Failed:", e);
+        setDbStatus('error');
+        setDbErrorDetails(e.message || "Unknown error");
+      }
+    };
+    checkDb();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // IMPORTANT FIX: Prevent queries if not authenticated
     if (!auth.currentUser) {
        window.alert("Authentification en cours... veuillez patienter une seconde.");
        return;
@@ -671,7 +692,6 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
       }
     } catch (e) {
       console.error(e);
-      // Fallback if DB connection fails entirely
       if (password === DEFAULT_ADMIN_PASSWORD) onLogin();
       else setError(true);
     }
@@ -686,6 +706,26 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
             <ShieldCheck size={24} />
           </div>
           <h2 className="text-2xl font-bold">Admin Access</h2>
+        </div>
+
+        {/* DIAGNOSTIC PANEL */}
+        <div className={`mb-6 p-3 rounded-xl text-xs font-mono border ${dbStatus === 'ok' ? 'bg-green-50 border-green-200 text-green-700' : dbStatus === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500'}`}>
+           <div className="flex items-center gap-2 mb-1 font-bold uppercase">
+             <Activity size={12} /> System Status
+           </div>
+           <div>App ID: {appId}</div>
+           <div className="flex items-center gap-1">
+             DB Connection: 
+             {dbStatus === 'checking' && <span className="animate-pulse">Checking...</span>}
+             {dbStatus === 'ok' && <span>OK</span>}
+             {dbStatus === 'error' && <span>ERROR</span>}
+           </div>
+           {dbStatus === 'error' && (
+             <div className="mt-2 pt-2 border-t border-red-200 text-[10px] leading-tight">
+               Error: {dbErrorDetails}.<br/><br/>
+               <strong>Check Firebase Console &gt; Firestore Rules.</strong> Set to "Test Mode" (allow read, write: if true;) to fix.
+             </div>
+           )}
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -1715,16 +1755,31 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
         gameData.quizData = { question: quizQuestion, answers: validAnswers };
       }
 
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), gameData);
+      // CRITICAL FIX: Timeout race for addDoc to prevent infinite loading
+      const addPromise = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'puzzles'), gameData);
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 5000));
+      
+      await Promise.race([addPromise, timeoutPromise]);
+
       setNewGame({ name: '', points: 100, gridSize: 3, description: '', imageUrl: '' });
       setQuizQuestion('');
       setQuizAnswers([{ id: '1', text: '', isCorrect: false }, { id: '2', text: '', isCorrect: false }, { id: '3', text: '', isCorrect: false }]);
-    } catch (err) { console.error(err); }
-    setIsSubmitting(false);
+    } catch (err) { 
+        console.error(err); 
+        window.alert("Operation timed out or failed. Please check network.");
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
   const handleDeleteGame = async (id: string) => {
-    if (window.confirm('Delete this mission?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'puzzles', id));
+    if (!window.confirm('Delete this mission?')) return;
+    try {
+        await Promise.race([
+            deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'puzzles', id)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+        ]);
+    } catch(e) { console.error(e); window.alert("Delete failed/timed out."); }
   };
 
   const moveGame = async (idx: number, dir: -1 | 1) => {
@@ -1745,14 +1800,30 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
         ...newItem,
         order: marketItems.length > 0 ? Math.max(...marketItems.map(i => i.order)) + 1 : 0,
       };
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'market'), itemData);
+      
+      // CRITICAL FIX: Timeout race
+      await Promise.race([
+          addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'market'), itemData),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+      ]);
+
       setNewItem({ name: '', cost: 100, type: 'multiplier', iconKey: 'zap', value: 0.1 });
-    } catch (err) { console.error(err); }
-    setIsSubmitting(false);
+    } catch (err) { 
+        console.error(err); 
+        window.alert("Operation timed out or failed.");
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
   const handleDeleteItem = async (id: string) => {
-    if (window.confirm('Delete this item?')) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'market', id));
+    if (!window.confirm('Delete this item?')) return;
+    try {
+        await Promise.race([
+            deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'market', id)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+        ]);
+    } catch(e) { console.error(e); window.alert("Delete failed/timed out."); }
   };
 
   const moveItem = async (idx: number, dir: -1 | 1) => {
@@ -1769,14 +1840,18 @@ const AdminPanel = ({ wallet, authUser, onDisconnect }: { wallet: string, authUs
     if (!newPassword) return;
     setIsSubmitting(true);
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admin', 'config'), { password: newPassword });
+      await Promise.race([
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admin', 'config'), { password: newPassword }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+      ]);
       setPasswordStatus('Password updated successfully');
       setNewPassword('');
     } catch (e) {
       setPasswordStatus('Error updating password');
+    } finally {
+      setIsSubmitting(false);
+      setTimeout(() => setPasswordStatus(''), 3000);
     }
-    setIsSubmitting(false);
-    setTimeout(() => setPasswordStatus(''), 3000);
   };
 
   const updateAnswer = (idx: number, field: keyof QuizAnswer, val: any) => {
