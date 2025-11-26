@@ -5,7 +5,7 @@ import {
   Menu, LogOut, ShoppingBag, Clock, Zap, Share2, Twitter, 
   HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
   ChevronDown, ChevronRight, Timer, ArrowRight, X, User as UserIcon, 
-  Camera, ArrowUp, ArrowDown, Gift, BookOpen, Key, Settings, Link as LinkIcon,
+  Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
   Activity, MapPin, ExternalLink, Search
 } from 'lucide-react';
 
@@ -149,7 +149,7 @@ type GameConfig = {
   points: number;
   gridSize?: number;
   bestTime?: number; // ms
-  bestTimeHolder?: string;
+  bestTimeHolder?: string; // Nom du recordman
   order: number;
   quizData?: {
     question: string;
@@ -185,7 +185,7 @@ type UserProfile = {
   multiplier: number; 
   inventory: string[]; 
   failedAttempts: Record<string, number>;
-  personalBestTimes?: Record<string, number>;
+  personalBestTimes?: Record<string, number>; // Temps personnels par jeu
 };
 
 type MarketItem = {
@@ -247,7 +247,6 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   'shield': <ShieldCheck className="text-purple-500" size={24} />,
   'trophy': <Trophy className="text-orange-500" size={24} />,
   'gift': <Gift className="text-pink-500" size={24} />,
-  // 'star' removed to avoid errors
 };
 
 // --- HELPER FUNCTIONS ---
@@ -266,7 +265,7 @@ const formatTimeRemaining = (endTime: number) => {
 // UPDATED: Round to seconds, NO decimals
 const formatDuration = (ms: number) => {
   const min = Math.floor(ms / 60000);
-  const sec = Math.floor((ms % 60000) / 1000);
+  const sec = Math.floor((ms % 60000) / 1000); // Changed to Math.floor for integer seconds
   return `${min}m ${sec.toString().padStart(2, '0')}s`;
 };
 
@@ -507,6 +506,7 @@ const WelcomeModal = ({ onClose }: { onClose: () => void }) => (
           You've just unlocked your identity. As a welcome bonus, we've reduced your reward lock by <strong>1 hour</strong>.
         </p>
         
+        {/* NEW INFO BLOCK FOR BAG WARS */}
         <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl text-orange-800 text-left">
           <p className="font-bold mb-1 flex items-center gap-2"><Info size={16}/> Note for BAG WARS players:</p>
           <p className="opacity-90 leading-relaxed">
@@ -1431,7 +1431,7 @@ const GameView = ({
       <div className="aspect-square w-full max-w-xl mx-auto bg-white rounded-3xl border border-black/5 flex flex-col items-center justify-center text-center p-8 relative overflow-hidden shadow-xl animate-in fade-in zoom-in">
         <div className="relative z-10 bg-white/90 p-10 rounded-[32px] border border-white shadow-sm backdrop-blur-xl max-w-md">
             <div className="w-24 h-24 bg-yellow-50 text-yellow-500 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-100">
-               {lastReward.isRecord ? <Trophy className="w-12 h-12 animate-bounce" /> : <CheckCircle className="w-12 h-12" />}
+               {lastReward.isRecord ? "🏆" : <CheckCircle className="w-12 h-12" />}
             </div>
             <h2 className="text-3xl font-bold text-[#1A1A1A] mb-1">{lastReward.isRecord ? "NEW RECORD!" : "Mission Complete"}</h2>
             <p className="text-neutral-400 mb-6">Protocol Verified Successfully</p>
