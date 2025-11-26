@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Loader2, CheckCircle, XCircle, Wallet, ShieldCheck, 
   LayoutGrid, RefreshCw, Trophy, Plus, Lock, Play, ArrowUpRight, 
@@ -6,10 +6,11 @@ import {
   HelpCircle, FileImage, Upload, Trash2, AlertTriangle, Info, Crown,
   ChevronDown, ChevronRight, Timer, ArrowRight, Star, X, User as UserIcon, 
   Camera, Edit2, ArrowUp, ArrowDown, Gift, BookOpen, PartyPopper, Key, Settings, Link as LinkIcon,
-  Activity, Database, Wifi, Filter, Mail, Search, ExternalLink, Target
+  Activity, Database, Wifi, Filter, Mail, Search, ExternalLink, Target,
+  TrendingUp, TrendingDown, BarChart3, DollarSign
 } from 'lucide-react';
 
-// Firebase Imports
+// --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
 import { 
   initializeAuth, 
@@ -37,6 +38,7 @@ import {
   getDoc,
   getDocs,
   where,
+  limit,
   initializeFirestore
 } from 'firebase/firestore';
 
@@ -47,13 +49,9 @@ declare global {
     __app_id?: string;
     __initial_auth_token?: string;
   }
-  var __firebase_config: string | undefined;
-  var __app_id: string | undefined;
-  var __initial_auth_token: string | undefined;
 }
 
 // --- CONFIGURATION & CONSTANTS ---
-
 const ADMIN_WALLET = "bc1q-midl-admin-satoshi-nakamoto"; 
 const DEFAULT_ADMIN_PASSWORD = "Midl2025";
 const INITIAL_LOCK_DAYS = 90;
@@ -61,15 +59,17 @@ const INITIAL_LOCK_MS = INITIAL_LOCK_DAYS * 24 * 60 * 60 * 1000;
 const MS_PER_HOUR = 3600000;
 const SHARE_BONUS_POINTS = 50;
 const QUIZ_LOCKOUT_MS = 24 * MS_PER_HOUR;
+const NINJA_GAME_DURATION = 60; // seconds
+const NINJA_STARTING_POINTS = 200;
 
-// --- FIREBASE INITIALIZATION OPTIMIZED ---
+// --- FIREBASE INITIALIZATION ---
 let firebaseConfig;
 try {
-  firebaseConfig = JSON.parse(
-    typeof __firebase_config !== 'undefined' 
-      ? __firebase_config!
-      : (window as any).__firebase_config || '{}'
-  );
+  if (typeof window.__firebase_config !== 'undefined') {
+      firebaseConfig = JSON.parse(window.__firebase_config);
+  } else {
+      firebaseConfig = { apiKey: "demo-key", projectId: "demo-project" }; 
+  }
 } catch (e) {
   console.error("Firebase Config Error", e);
   firebaseConfig = {};
@@ -89,18 +89,19 @@ const db = initializeFirestore(app, {
 } as any);
 
 // 3. App ID logic
-const envAppId = typeof __app_id !== 'undefined' ? __app_id : (window as any).__app_id;
+const envAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : undefined;
 const appId = envAppId || "midl-puzzle-production-v1";
 
 // --- STYLES & FONTS ---
-
 const GlobalStyles = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
     
     body, button, input, select, textarea {
       font-family: 'Outfit', sans-serif;
     }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
     
     body {
       margin: 0;
@@ -122,11 +123,12 @@ const GlobalStyles = () => (
       background: rgba(0,0,0,0.4);
     }
     
-    .glass-panel {
-      background: rgba(255, 255, 255, 0.4);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(0,0,0,0.08);
+    @keyframes marquee {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
     }
+    .animate-marquee { display: inline-block; white-space: nowrap; animation: marquee 30s linear infinite; }
+    .animate-marquee:hover { animation-play-state: paused; }
   `}</style>
 );
 
@@ -145,7 +147,7 @@ type GameConfig = {
   type: GameType;
   name: string;
   description?: string;
-  imageUrl?: string; // Used for Puzzle image OR Hunt hint image
+  imageUrl?: string; 
   points: number;
   gridSize?: number;
   bestTime?: number; // ms
@@ -173,7 +175,7 @@ type Piece = {
 
 type UserProfile = {
   wallet: string;
-  uid?: string; // Firebase Auth UID
+  uid?: string; 
   email?: string;
   displayName: string;
   avatarUrl?: string;
@@ -185,6 +187,7 @@ type UserProfile = {
   inventory: string[]; 
   failedAttempts: Record<string, number>;
   personalBestTimes?: Record<string, number>;
+  lastDailyNinja?: number; 
 };
 
 type MarketItem = {
@@ -198,46 +201,13 @@ type MarketItem = {
   order: number;
 };
 
-// --- SHOP CONFIGURATION ---
-
-const DEFAULT_MARKET_ITEMS = [
-  {
-    name: 'Time Warp I',
-    description: 'Increase lock reduction speed by 10%.',
-    cost: 200,
-    type: 'multiplier',
-    value: 0.1,
-    iconKey: 'zap',
-    order: 0
-  },
-  {
-    name: 'Flash Loan',
-    description: 'Instantly reduce lock time by 24 hours.',
-    cost: 150,
-    type: 'time_reduction',
-    value: 24 * 3600000,
-    iconKey: 'clock',
-    order: 1
-  },
-  {
-    name: 'Time Warp II',
-    description: 'Increase lock reduction speed by 25%.',
-    cost: 500,
-    type: 'multiplier',
-    value: 0.25,
-    iconKey: 'zap',
-    order: 2
-  },
-  {
-    name: 'Founder 1:1',
-    description: 'Exclusive 30min call with Midl founder.',
-    cost: 5000,
-    type: 'special',
-    value: 0,
-    iconKey: 'shield',
-    order: 3
-  }
-];
+type RewardData = {
+  puzzleId: string;
+  points: number;
+  multiplier: number;
+  time: number;
+  isRecord: boolean;
+};
 
 // Icon Mapper
 const ICON_MAP: Record<string, React.ReactNode> = {
@@ -284,7 +254,7 @@ const AVATAR_URLS = [
   "https://images.unsplash.com/photo-1628260412297-a3377e45006f?w=150&h=150&fit=crop&q=80"
 ];
 
-// --- 5. BASIC UI COMPONENTS ---
+// --- UI COMPONENTS ---
 
 const Tooltip = ({ children, text, className }: { children: React.ReactNode, text: string, className?: string }) => (
   <div className={`relative group flex items-center ${className}`}>
@@ -305,13 +275,11 @@ const ImageDropzone = ({
   setImage: (val: string) => void,
   className?: string 
 }) => {
-  
   const processFile = (file: File) => {
     if (file.size > 800 * 1024) {
-      window.alert("⚠️ Image trop volumineuse (Max 800 Ko).");
+      window.alert("⚠️ Image too large (Max 800KB).");
       return;
     }
-
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = () => {
@@ -320,50 +288,26 @@ const ImageDropzone = ({
       reader.readAsDataURL(file);
     }
   };
-
   const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (file) processFile(file);
   }, [setImage]);
-
-  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-       processFile(e.target.files[0]);
-    }
-  };
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); };
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files[0]) processFile(e.target.files[0]); };
 
   return (
-    <div 
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      className={`relative border-2 border-dashed rounded-xl transition-colors overflow-hidden flex flex-col items-center justify-center text-center cursor-pointer ${image ? 'border-orange-200 bg-orange-50' : 'border-neutral-200 bg-neutral-50 hover:bg-neutral-100'} ${className}`}
-    >
-       <input 
-         type="file" 
-         accept="image/*" 
-         onChange={handleFileSelect} 
-         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-       />
-       
+    <div onDrop={onDrop} onDragOver={onDragOver} className={`relative border-2 border-dashed rounded-xl transition-colors overflow-hidden flex flex-col items-center justify-center text-center cursor-pointer ${image ? 'border-orange-200 bg-orange-50' : 'border-neutral-200 bg-neutral-50 hover:bg-neutral-100'} ${className}`}>
+       <input type="file" accept="image/*" onChange={handleFileSelect} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"/>
        {image ? (
          <div className="relative w-full h-full group">
            <img src={image} alt="Preview" className="w-full h-full object-cover" />
-           <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-             <span className="text-white font-medium text-sm">Replace Image</span>
-           </div>
+           <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><span className="text-white font-medium text-sm">Replace Image</span></div>
          </div>
        ) : (
          <div className="p-6">
-           <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mx-auto mb-3">
-             <Upload size={18} className="text-neutral-400" />
-           </div>
+           <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mx-auto mb-3"><Upload size={18} className="text-neutral-400" /></div>
            <div className="text-sm font-medium text-neutral-600">Drop image here</div>
-           <div className="text-xs text-neutral-400 mt-1">or click to browse</div>
          </div>
        )}
     </div>
@@ -372,55 +316,38 @@ const ImageDropzone = ({
 
 const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string }) => {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
-
   useEffect(() => {
     if (!appId) return;
     const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'profiles'), (snap) => {
       const data: UserProfile[] = [];
       snap.forEach(d => data.push({ wallet: d.id, ...d.data() } as UserProfile));
       setProfiles(data.sort((a, b) => (b.lifetimePoints || b.points) - (a.lifetimePoints || a.points)));
-    }, (error) => {
-        console.log("Leaderboard fetch error:", error.message);
-    });
+    }, (error) => console.log("Leaderboard fetch error:", error.message));
     return () => unsub();
   }, []);
-
   const top3 = profiles.slice(0, 3);
   const userRank = profiles.findIndex(p => p.wallet === currentUserWallet);
   const userInTop3 = userRank < 3;
-
   return (
     <div className="bg-[#F5F5F4] rounded-2xl border border-black/5 p-4 mt-4">
-      <div className="flex items-center gap-2 mb-3 text-xs font-bold text-neutral-500 uppercase tracking-wider">
-        <Trophy size={12} className="text-yellow-500" /> Top Solvers
-      </div>
-      
+      <div className="flex items-center gap-2 mb-3 text-xs font-bold text-neutral-500 uppercase tracking-wider"><Trophy size={12} className="text-yellow-500" /> Top Solvers</div>
       <div className="space-y-2">
         {top3.map((p, idx) => (
           <div key={p.wallet} className={`flex items-center justify-between text-sm p-2 rounded-lg ${p.wallet === currentUserWallet ? 'bg-white shadow-sm' : ''}`}>
             <div className="flex items-center gap-2">
-              <span className={`w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold ${idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-neutral-200 text-neutral-600' : 'bg-orange-100 text-orange-700'}`}>
-                {idx + 1}
-              </span>
-              <div className="w-5 h-5 rounded-full bg-neutral-300 overflow-hidden flex-shrink-0">
-                 {p.avatarUrl ? <img src={p.avatarUrl} className="w-full h-full object-cover" alt="" /> : null}
-              </div>
-              <span className="font-medium text-neutral-700 truncate w-24">
-                {p.displayName || `${p.wallet.substring(0, 4)}...`}
-              </span>
+              <span className={`w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold ${idx === 0 ? 'bg-yellow-100 text-yellow-700' : idx === 1 ? 'bg-neutral-200 text-neutral-600' : 'bg-orange-100 text-orange-700'}`}>{idx + 1}</span>
+              <div className="w-5 h-5 rounded-full bg-neutral-300 overflow-hidden flex-shrink-0">{p.avatarUrl && <img src={p.avatarUrl} className="w-full h-full object-cover" alt="" />}</div>
+              <span className="font-medium text-neutral-700 truncate w-24">{p.displayName || `${p.wallet.substring(0, 4)}...`}</span>
             </div>
             <span className="font-bold text-black text-xs">{p.lifetimePoints || p.points}</span>
           </div>
         ))}
-
         {!userInTop3 && userRank !== -1 && (
           <>
             <div className="border-t border-neutral-200 my-1"></div>
             <div className="flex items-center justify-between text-sm p-2 rounded-lg bg-white shadow-sm border border-orange-100">
               <div className="flex items-center gap-2">
-                <span className="w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold bg-neutral-100 text-neutral-500">
-                  {userRank + 1}
-                </span>
+                <span className="w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-bold bg-neutral-100 text-neutral-500">{userRank + 1}</span>
                 <span className="font-medium text-black truncate w-20">You</span>
               </div>
               <span className="font-bold text-black text-xs">{profiles[userRank].lifetimePoints || profiles[userRank].points}</span>
@@ -428,6 +355,260 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
           </>
         )}
       </div>
+    </div>
+  );
+};
+
+// --- NEW COMPONENT: ACTIVITY TICKER ---
+const ActivityTicker = () => {
+    const [activities, setActivities] = useState<any[]>([]);
+    
+    useEffect(() => {
+        if (!appId) return;
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'validations'), orderBy('timestamp', 'desc'), limit(15));
+        const unsub = onSnapshot(q, (snap) => {
+            const acts: any[] = [];
+            snap.forEach(d => acts.push({ id: d.id, ...d.data() }));
+            setActivities(acts);
+        });
+        return () => unsub();
+    }, []);
+
+    if (activities.length === 0) return null;
+
+    return (
+        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-2 border-b border-white/10 relative z-20">
+            <div className="flex animate-marquee gap-8 items-center">
+                {activities.map((act) => (
+                    <div key={act.id} className="flex items-center gap-2 text-xs font-mono opacity-80 whitespace-nowrap">
+                        <span className="text-green-400">⚡</span>
+                        <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
+                        <span>completed mission</span>
+                        <span className="text-orange-300 font-bold">#{act.puzzleId ? act.puzzleId.substring(0,4) : '???'}</span>
+                        <span>in</span>
+                        <span className="text-white font-bold">{formatDuration(act.duration)}</span>
+                        <span className="text-green-400">(+{act.points} PTS)</span>
+                    </div>
+                ))}
+                 {activities.length < 5 && activities.map((act) => (
+                    <div key={`${act.id}-dup`} className="flex items-center gap-2 text-xs font-mono opacity-80 whitespace-nowrap">
+                        <span className="text-green-400">⚡</span>
+                        <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
+                        <span>completed mission</span>
+                        <span className="text-orange-300 font-bold">#{act.puzzleId ? act.puzzleId.substring(0,4) : '???'}</span>
+                        <span>in</span>
+                        <span className="text-white font-bold">{formatDuration(act.duration)}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+// --- NEW COMPONENT: DAILY CHART NINJA GAME ---
+const ChartNinjaGame = ({ userProfile, wallet, onClose }: { userProfile: UserProfile, wallet: string, onClose: () => void }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [gameOver, setGameOver] = useState(false);
+  const [score, setScore] = useState(NINJA_STARTING_POINTS);
+  const [timeLeft, setTimeLeft] = useState(NINJA_GAME_DURATION);
+  const [priceHistory, setPriceHistory] = useState<number[]>([50000]);
+  const [currentBet, setCurrentBet] = useState<'UP' | 'DOWN' | null>(null);
+  const [message, setMessage] = useState('');
+  
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const canPlay = useMemo(() => {
+    if (!userProfile.lastDailyNinja) return true;
+    const last = new Date(userProfile.lastDailyNinja);
+    const now = new Date();
+    return last.getDate() !== now.getDate() || last.getMonth() !== now.getMonth() || last.getFullYear() !== now.getFullYear();
+  }, [userProfile.lastDailyNinja]);
+
+  // Game Loop
+  useEffect(() => {
+    if (isPlaying && timeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+        
+        setPriceHistory(prev => {
+          const lastPrice = prev[prev.length - 1];
+          const volatility = lastPrice * 0.002; // 0.2% volatility
+          const change = (Math.random() - 0.5) * volatility;
+          const newPrice = lastPrice + change;
+          
+          if (currentBet) {
+             const won = (currentBet === 'UP' && newPrice > lastPrice) || (currentBet === 'DOWN' && newPrice < lastPrice);
+             if (won) {
+                setScore(s => s + 10);
+                setMessage("+10");
+             } else {
+                setScore(s => Math.max(0, s - 10));
+                setMessage("-10");
+             }
+             setCurrentBet(null);
+          } else {
+             setMessage("");
+          }
+
+          const newHistory = [...prev, newPrice];
+          if (newHistory.length > 50) newHistory.shift(); 
+          return newHistory;
+        });
+
+      }, 1000);
+    } else if (timeLeft === 0 && isPlaying) {
+      endGame();
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isPlaying, timeLeft, currentBet]);
+
+  // Draw Chart
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+
+    if (priceHistory.length < 2) return;
+
+    const min = Math.min(...priceHistory);
+    const max = Math.max(...priceHistory);
+    const range = max - min || 1;
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#F97316'; 
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+
+    priceHistory.forEach((price, i) => {
+       const x = (i / (priceHistory.length - 1)) * width;
+       const y = height - ((price - min) / range) * (height - 40) - 20;
+       if (i === 0) ctx.moveTo(x, y);
+       else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    const lastPrice = priceHistory[priceHistory.length - 1];
+    const lastX = width;
+    const lastY = height - ((lastPrice - min) / range) * (height - 40) - 20;
+    
+    ctx.beginPath();
+    ctx.fillStyle = '#F97316';
+    ctx.arc(lastX - 2, lastY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+  }, [priceHistory]);
+
+  const startGame = () => {
+     setIsPlaying(true);
+     setScore(NINJA_STARTING_POINTS);
+     setTimeLeft(NINJA_GAME_DURATION);
+     setPriceHistory([50000]);
+  };
+
+  const endGame = async () => {
+    setIsPlaying(false);
+    setGameOver(true);
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'profiles', wallet), {
+           points: userProfile.points + score,
+           lifetimePoints: userProfile.lifetimePoints + score,
+           lastDailyNinja: Date.now()
+        });
+    } catch(e) { console.error(e); }
+  };
+
+  if (!canPlay && !gameOver && !isPlaying) {
+      return (
+        <div className="w-full max-w-2xl mx-auto bg-white rounded-3xl p-8 text-center shadow-lg border border-black/5 animate-in fade-in zoom-in">
+             <div className="w-20 h-20 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-6 text-neutral-400">
+                <Clock size={40} />
+             </div>
+             <h2 className="text-2xl font-bold mb-2">Daily Limit Reached</h2>
+             <p className="text-neutral-500 mb-6">Come back tomorrow for another round of Chart Ninja.</p>
+             <button onClick={onClose} className="bg-neutral-900 text-white px-8 py-3 rounded-xl font-medium">Back to Dashboard</button>
+        </div>
+      );
+  }
+
+  return (
+    <div className="w-full max-w-4xl mx-auto bg-white rounded-3xl overflow-hidden shadow-xl border border-black/5 flex flex-col md:flex-row min-h-[500px] animate-in fade-in zoom-in">
+        <div className="flex-1 p-6 relative bg-neutral-50 flex flex-col">
+           <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                 <div className="w-10 h-10 bg-black text-white rounded-lg flex items-center justify-center"><BarChart3 size={20} /></div>
+                 <div>
+                    <h2 className="font-bold text-lg leading-none">Chart Ninja</h2>
+                    <span className="text-xs text-neutral-500 font-mono">BTC/USD (Simulated)</span>
+                 </div>
+              </div>
+              <div className="bg-white px-3 py-1 rounded-lg border border-neutral-200 text-sm font-mono font-bold">
+                 {timeLeft}s
+              </div>
+           </div>
+
+           <div className="flex-1 bg-white rounded-2xl border border-neutral-200 shadow-inner relative overflow-hidden">
+               {!isPlaying && !gameOver && (
+                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10">
+                       <p className="text-neutral-600 mb-4 max-w-xs text-center">Predict price movement every second. Start with 200 PTS. Keep what you hold.</p>
+                       <button onClick={startGame} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transition-transform hover:scale-105 flex items-center gap-2">
+                          <Play size={20} /> Start Game
+                       </button>
+                   </div>
+               )}
+               
+               {gameOver && (
+                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 z-10">
+                       <h3 className="text-3xl font-bold mb-2 text-[#1A1A1A]">Session Complete</h3>
+                       <div className="text-6xl font-black text-orange-500 mb-4">{score} <span className="text-xl text-neutral-400 font-medium">PTS EARNED</span></div>
+                       <button onClick={onClose} className="bg-black text-white font-bold py-3 px-8 rounded-xl">Collect & Exit</button>
+                   </div>
+               )}
+
+               <canvas ref={canvasRef} width={600} height={300} className="w-full h-full object-contain" />
+               
+               {message && (
+                   <div className={`absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-4xl font-black ${message.includes('+') ? 'text-green-500' : 'text-red-500'} animate-bounce`}>
+                      {message}
+                   </div>
+               )}
+           </div>
+        </div>
+
+        <div className="w-full md:w-64 bg-white border-l border-neutral-100 p-6 flex flex-col gap-4">
+            <div className="bg-[#1A1A1A] text-white p-4 rounded-2xl text-center">
+               <div className="text-xs text-neutral-400 uppercase tracking-widest mb-1">Current Balance</div>
+               <div className="text-3xl font-mono font-bold">{score}</div>
+            </div>
+
+            <div className="flex-1 flex flex-col justify-center gap-3">
+               <button 
+                 disabled={!isPlaying}
+                 onMouseDown={() => setCurrentBet('UP')}
+                 className={`flex-1 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 transition-all ${currentBet === 'UP' ? 'bg-green-600 scale-95' : 'bg-green-500 hover:bg-green-400'} text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed`}
+               >
+                  <TrendingUp size={32} /> UP
+               </button>
+               <button 
+                 disabled={!isPlaying}
+                 onMouseDown={() => setCurrentBet('DOWN')}
+                 className={`flex-1 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 transition-all ${currentBet === 'DOWN' ? 'bg-red-600 scale-95' : 'bg-red-500 hover:bg-red-400'} text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed`}
+               >
+                  <TrendingDown size={32} /> DOWN
+               </button>
+            </div>
+            
+            <div className="text-xs text-center text-neutral-400 leading-tight">
+               Hold click/tap to lock prediction for next tick.
+            </div>
+        </div>
     </div>
   );
 };
@@ -654,7 +835,7 @@ const ProfileSettings = ({ userProfile, onClose, wallet }: { userProfile: UserPr
                       const file = e.target.files?.[0];
                       if (file) {
                         if (file.size > 800 * 1024) {
-                           window.alert("Image trop volumineuse (Max 800 Ko).");
+                           window.alert("Image too large (Max 800 KB).");
                            return;
                         }
                         const reader = new FileReader();
@@ -755,7 +936,7 @@ const AdminLogin = ({ onLogin, onCancel }: { onLogin: () => void, onCancel: () =
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser) {
-       window.alert("Authentification en cours... veuillez patienter une seconde.");
+       window.alert("Authenticating... please wait a second.");
        return;
     }
 
@@ -1631,7 +1812,7 @@ const GameView = ({
 };
 
 const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, authUser: User, onDisconnect: () => void }) => {
-  const [activeTab, setActiveTab] = useState<'puzzles' | 'market'>('puzzles');
+  const [activeTab, setActiveTab] = useState<'puzzles' | 'market' | 'ninja'>('puzzles');
   const [filterType, setFilterType] = useState<'all' | 'puzzle' | 'quiz' | 'hunt'>('all');
   const [games, setGames] = useState<GameConfig[]>([]);
   const [activeGame, setActiveGame] = useState<GameConfig | null>(null);
@@ -1749,6 +1930,7 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'validations'), {
         wallet, 
+        displayName: userProfile.displayName,
         puzzleId: activeGame.id, 
         duration,
         points: earnedPoints,
@@ -1879,9 +2061,14 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
         </div>
 
         <nav className="flex-1 overflow-y-auto p-6 space-y-1">
-            <button onClick={() => { setActiveTab('market'); setMobileMenuOpen(false); }} className="w-full bg-gradient-to-br from-orange-100 to-orange-50 p-4 rounded-2xl border border-orange-200 flex items-center gap-4 mb-6 hover:shadow-md transition-all group text-left">
+            <button onClick={() => { setActiveTab('market'); setMobileMenuOpen(false); }} className={`w-full bg-gradient-to-br p-4 rounded-2xl border flex items-center gap-4 mb-2 hover:shadow-md transition-all group text-left ${activeTab === 'market' ? 'from-orange-200 to-orange-100 border-orange-300' : 'from-orange-100 to-orange-50 border-orange-200'}`}>
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-orange-500 shadow-sm group-hover:scale-110 transition-transform"><ShoppingBag size={24} /></div>
                 <div><div className="font-bold text-orange-900">The Market</div><div className="text-xs text-orange-700 opacity-80">Spend your points</div></div>
+            </button>
+            
+            <button onClick={() => { setActiveTab('ninja'); setMobileMenuOpen(false); }} className={`w-full bg-gradient-to-br p-4 rounded-2xl border flex items-center gap-4 mb-6 hover:shadow-md transition-all group text-left ${activeTab === 'ninja' ? 'from-neutral-800 to-neutral-900 border-neutral-700 text-white' : 'from-neutral-100 to-white border-neutral-200 text-neutral-800'}`}>
+                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-black shadow-sm group-hover:scale-110 transition-transform border border-black/5"><BarChart3 size={24} /></div>
+                <div><div className={`font-bold ${activeTab === 'ninja' ? 'text-white' : 'text-black'}`}>Chart Ninja</div><div className={`text-xs opacity-80 ${activeTab === 'ninja' ? 'text-neutral-400' : 'text-neutral-500'}`}>Daily Mini-Game</div></div>
             </button>
 
             <div className="flex gap-1 mb-4 p-1 bg-[#F5F5F4] rounded-xl overflow-x-auto">
@@ -1961,9 +2148,26 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
         </div>
       </aside>
 
-      <main className="flex-1 p-4 lg:p-12 overflow-y-auto lg:ml-72 pt-20 lg:pt-12 z-10 relative">
-        <div className="max-w-7xl mx-auto">
+      <main className="flex-1 p-4 lg:p-12 overflow-y-auto lg:ml-72 pt-20 lg:pt-12 z-10 relative flex flex-col">
+        {/* NEW: SCROLLING TICKER IN MAIN CONTENT AREA */}
+        <div className="mb-6 -mt-2">
+           <ActivityTicker />
+        </div>
+
+        <div className="max-w-7xl mx-auto w-full">
           {activeTab === 'market' && userProfile && (<Market userProfile={userProfile} wallet={wallet} />)}
+          
+          {/* NEW: NINJA GAME VIEW */}
+          {activeTab === 'ninja' && userProfile && (
+             <div className="animate-in fade-in zoom-in">
+                <div className="text-center mb-8">
+                   <h1 className="text-4xl font-black text-[#1A1A1A] mb-2 tracking-tight">DAILY CHART NINJA</h1>
+                   <p className="text-neutral-500 max-w-lg mx-auto">Predict the market moves. 60 seconds on the clock. Start with 200 PTS. Keep what you earn.</p>
+                </div>
+                <ChartNinjaGame userProfile={userProfile} wallet={wallet} onClose={() => setActiveTab('puzzles')} />
+             </div>
+          )}
+
           {activeTab === 'puzzles' && (
             <div className="flex flex-col items-center justify-center w-full">
                 <div className="w-full max-w-4xl space-y-8">
@@ -2360,20 +2564,20 @@ const App = () => {
           <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
             <ShieldCheck size={32} />
           </div>
-          <h2 className="text-xl font-bold text-[#1A1A1A] mb-4">Configuration Requise</h2>
+          <h2 className="text-xl font-bold text-[#1A1A1A] mb-4">Configuration Required</h2>
           <p className="text-neutral-600 text-sm mb-6 leading-relaxed">
-            L'authentification est désactivée dans votre projet Firebase.
+            Authentication is currently disabled in your Firebase project.
             <br/><br/>
-            1. Allez sur la <strong>Console Firebase</strong>.
+            1. Go to the <strong>Firebase Console</strong>.
             <br/>
-            2. Cliquez sur <strong>Authentication</strong> (menu gauche).
+            2. Click on <strong>Authentication</strong> (left menu).
             <br/>
-            3. Cliquez sur <strong>Sign-in method</strong>.
+            3. Click on <strong>Sign-in method</strong>.
             <br/>
-            4. Activez <strong>Anonymous</strong> et <strong>Email/Password</strong>.
+            4. Enable <strong>Anonymous</strong> and <strong>Email/Password</strong>.
           </p>
           <button onClick={() => window.location.reload()} className="bg-black text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-neutral-800 transition-colors">
-            J'ai activé, recharger
+            Reload App
           </button>
         </div>
       </div>
