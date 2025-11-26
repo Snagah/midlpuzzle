@@ -124,13 +124,13 @@ const GlobalStyles = () => (
     }
     
     @keyframes marquee {
-      0% { transform: translateX(0); }
-      100% { transform: translateX(-50%); } /* Move exactly half (since list is doubled) */
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
     }
     .animate-marquee { 
       display: flex;
       white-space: nowrap; 
-      animation: marquee 20s linear infinite; 
+      animation: marquee 10s linear infinite; /* High speed */
     }
     .animate-marquee:hover { animation-play-state: paused; }
   `}</style>
@@ -366,38 +366,52 @@ const LeaderboardWidget = ({ currentUserWallet }: { currentUserWallet: string })
 // --- NEW COMPONENT: ACTIVITY TICKER ---
 const ActivityTicker = ({ games }: { games: GameConfig[] }) => {
     const [activities, setActivities] = useState<any[]>([]);
+    const mountTime = useRef(Date.now()); // Track when we started listening
     
     useEffect(() => {
         if (!appId) return;
-        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'validations'), orderBy('timestamp', 'desc'), limit(30));
+        
+        // Listen to recent validations
+        const q = query(
+            collection(db, 'artifacts', appId, 'public', 'data', 'validations'), 
+            orderBy('timestamp', 'desc'), 
+            limit(5)
+        );
+
         const unsub = onSnapshot(q, (snap) => {
-            const acts: any[] = [];
-            snap.forEach(d => acts.push({ id: d.id, ...d.data() }));
-            setActivities(acts);
+            snap.docChanges().forEach((change) => {
+                if (change.type === 'added') {
+                    const data = change.doc.data();
+                    // STRICT FILTER: Only show events that happen AFTER mount (Live events only)
+                    const eventTime = data.timestamp ? data.timestamp.toMillis() : 0;
+                    
+                    // Add a small buffer (e.g., 1000ms) or strict check to ensure no preloaded data
+                    if (eventTime > mountTime.current) {
+                        setActivities(prev => [{ id: change.doc.id, ...data }, ...prev]);
+                    }
+                }
+            });
         });
         return () => unsub();
     }, []);
 
     const getGameName = (id: string) => {
         const g = games.find(game => game.id === id);
-        return g ? g.name : `Mission ${id.substring(0, 4)}`;
+        return g ? g.name : 'Unknown Mission';
     };
 
-    if (activities.length === 0) return null;
-
-    // Duplicate items to create a seamless infinite scroll
-    const marqueeItems = [...activities, ...activities, ...activities];
+    if (activities.length === 0) return <div className="w-full bg-[#1A1A1A] h-10 border-b border-white/10" />;
 
     return (
-        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-3 border-b border-white/10 relative z-20 shadow-md">
-            <div className="flex animate-marquee">
-                {marqueeItems.map((act, idx) => (
-                    <div key={`${act.id}-${idx}`} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap mx-8">
-                        <span className="text-green-400">⚡</span>
-                        <span className="font-bold text-white">{act.displayName || 'Anonymous'}</span>
-                        <span className="text-neutral-400">completed</span>
+        <div className="w-full bg-[#1A1A1A] text-white overflow-hidden py-2.5 border-b border-white/10 relative z-20 shadow-md">
+             <div className="flex animate-marquee gap-8 w-max px-4">
+                {activities.map((act) => (
+                    <div key={act.id} className="flex items-center gap-2 text-xs font-mono whitespace-nowrap bg-white/5 px-3 py-1 rounded-full border border-white/10">
+                        <span className="text-green-400 animate-pulse">●</span>
+                        <span className="font-bold text-white">{act.displayName || 'Agent'}</span>
+                        <span className="text-neutral-500">verified</span>
                         <span className="text-orange-400 font-bold">{getGameName(act.puzzleId)}</span>
-                        <span className="text-neutral-400">in</span>
+                        <span className="text-neutral-500">in</span>
                         <span className="text-white font-bold">{formatDuration(act.duration)}</span>
                         <span className="text-green-400 font-bold">(+{act.points} PTS)</span>
                     </div>
