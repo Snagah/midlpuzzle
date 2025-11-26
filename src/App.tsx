@@ -2195,17 +2195,24 @@ const UserDashboard = ({ wallet, authUser, onDisconnect }: { wallet: string, aut
                                <div key={game.id} onClick={() => { if(!lockout) setActiveGame(game) }} className={`group relative bg-white rounded-2xl p-4 border transition-all cursor-pointer hover:shadow-xl flex flex-col items-center text-center gap-3 ${solved ? 'border-green-200 bg-green-50/30' : lockout ? 'border-red-200 bg-red-50/30' : 'border-black/5 hover:border-orange-200 hover:-translate-y-1'}`}>
                                    
                                    {/* Compact Icon Tile */}
-                                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm ${
+                                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm overflow-hidden flex-shrink-0 ${
                                        solved ? 'bg-green-100 text-green-600' : 
                                        lockout ? 'bg-red-100 text-red-600' : 
                                        game.type === 'puzzle' ? 'bg-purple-100 text-purple-600' : 
                                        game.type === 'quiz' ? 'bg-blue-100 text-blue-600' : 
                                        'bg-orange-100 text-orange-600'
                                    } group-hover:scale-110 transition-transform`}>
-                                       {lockout ? <Lock size={24} /> : 
-                                        game.type === 'puzzle' ? <Puzzle size={24} /> : 
-                                        game.type === 'quiz' ? <HelpCircle size={24} /> : 
-                                        <Target size={24} />}
+                                       {lockout ? (
+                                          <Lock size={24} />
+                                       ) : game.type === 'puzzle' && game.imageUrl ? (
+                                          <img src={game.imageUrl} alt="Puzzle" className="w-full h-full object-cover" />
+                                       ) : game.type === 'puzzle' ? (
+                                          <Puzzle size={24} /> 
+                                       ) : game.type === 'quiz' ? (
+                                          <HelpCircle size={24} /> 
+                                       ) : (
+                                          <Target size={24} />
+                                       )}
                                    </div>
                                    
                                    <div className="w-full">
