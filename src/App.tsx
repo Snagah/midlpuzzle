@@ -1178,8 +1178,8 @@ const PuzzleGame = ({
             const snappedX = gridX + (col * pieceSize);
             const snappedY = gridY + (row * pieceSize);
             
-            const absCorrectX = gridX + piece.correctX;
-            const absCorrectY = gridY + piece.correctY;
+            const absCorrectX = gridX + p.correctX;
+            const absCorrectY = gridY + p.correctY;
             const dist = Math.sqrt(Math.pow(snappedX - absCorrectX, 2) + Math.pow(snappedY - absCorrectY, 2));
             
             if (dist < 10) {
